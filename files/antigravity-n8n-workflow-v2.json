@@ -1,0 +1,488 @@
+{
+  "name": "Antigravity VSL - Bridge Architecture v2",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "aee2dcbc-8bb2-4498-84a3-960116efbc88",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 0],
+      "id": "webhook-start",
+      "name": "Webhook Entrata"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose", "version": 3 },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.body.type }}",
+                    "rightValue": "SRT",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose", "version": 3 },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.body.type }}",
+                    "rightValue": "PROMPTS",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [240, 0],
+      "id": "switch-input-type",
+      "name": "Switch Tipo Input"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Parser SRT ──────────────────────────────────────\nconst data = items[0].json.body || {};\nconst rawData = data.content || '';\nconst callbackUrl = data.callback_url || 'http://localhost:3001/update-scene';\nconst userAgentPrompt = data.user_agent_prompt || '';\nconst interval = parseFloat(data.sampling_sec) || 5;\nconst projectId = data.project_id || 'default_' + Date.now();\n\nif (!rawData) return [{ json: { error: 'Contenuto SRT mancante' } }];\n\nconst timeMatches = rawData.match(/\\d{2}:\\d{2}:\\d{2},\\d{3}/g) || [];\nif (!timeMatches.length) return [{ json: { error: 'Nessun timestamp trovato' } }];\n\nconst lastTs = timeMatches[timeMatches.length - 1];\nconst [h, m, sMs] = lastTs.split(':');\nconst [s, ms] = sMs.split(',');\nconst totalSeconds = parseInt(h) * 3600 + parseInt(m) * 60 + parseInt(s) + parseInt(ms) / 1000;\nconst numberOfFrames = Math.ceil(totalSeconds / interval);\n\nreturn [{\n  json: {\n    project_id: projectId,\n    user_agent_prompt: userAgentPrompt,\n    sampling_sec: interval,\n    raw_data: rawData,\n    input_type: 'SRT',\n    required_frames: numberOfFrames,\n    total_duration_sec: totalSeconds.toFixed(2),\n    callback_url: callbackUrl\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, -120],
+      "id": "code-parse-srt",
+      "name": "Parse SRT"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Parser PROMPTS (uno per riga) ────────────────────\nconst data = items[0].json.body || {};\nconst rawData = data.content || '';\nconst callbackUrl = data.callback_url || 'http://localhost:3001/update-scene';\nconst userAgentPrompt = data.user_agent_prompt || '';\nconst projectId = data.project_id || 'default_' + Date.now();\n\nconst prompts = rawData.split('\\n').map(l => l.trim()).filter(Boolean);\nconst numberOfFrames = prompts.length;\n\n// Formatta come JSON array per lo stesso AI Agent\nconst prebuiltScenes = JSON.stringify(prompts.map((p, i) => ({ scene_index: i, prompt: p })));\n\nreturn [{\n  json: {\n    project_id: projectId,\n    user_agent_prompt: userAgentPrompt,\n    raw_data: rawData,\n    input_type: 'PROMPTS',\n    required_frames: numberOfFrames,\n    prebuilt_scenes: prebuiltScenes,\n    callback_url: callbackUrl\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 120],
+      "id": "code-parse-prompts",
+      "name": "Parse PROMPTS"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false, "typeValidation": "loose", "version": 3 },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.input_type }}",
+              "rightValue": "PROMPTS",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [720, 0],
+      "id": "if-skip-ai",
+      "name": "Skip AI se PROMPTS"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Analizza questo script SRT e genera esattamente {{ $json.required_frames }} prompt visivi.\n\nSCRIPT SRT:\n{{ $json.raw_data }}\n\nRispondi SOLO con un array JSON valido, senza markdown, nel formato:\n[\n  { \"scene_index\": 0, \"prompt\": \"...\" },\n  { \"scene_index\": 1, \"prompt\": \"...\" }\n]\n\nGenera esattamente {{ $json.required_frames }} oggetti.",
+        "options": {
+          "systemMessage": "=## RUOLO AI ART DIRECTOR\n{{ $json.user_agent_prompt }}\n\nIMPORTANTE: Rispondi SOLO con JSON puro, zero testo prima o dopo. L'array deve iniziare con [ e finire con ]."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [960, -160],
+      "id": "ai-agent-srt",
+      "name": "AI Agent - Genera Prompt da SRT"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-pro",
+        "options": { "temperature": 0.1 }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [960, -20],
+      "id": "gemini-model-srt",
+      "name": "Gemini 2.5 Pro (SRT Agent)",
+      "credentials": {
+        "googlePalmApi": { "id": "dnbbRSUCugtSYmWq", "name": "Google Gemini(PaLM) Api account" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Estrai JSON dall'output AI Agent (per SRT) oppure usa prebuilt (per PROMPTS)\nconst item = items[0].json;\n\n// Se è PROMPTS, usa le scene già costruite\nif (item.prebuilt_scenes) {\n  try {\n    const scenes = JSON.parse(item.prebuilt_scenes);\n    const result = scenes.map(s => ({\n      json: {\n        scene_index: s.scene_index,\n        prompt: s.prompt,\n        project_id: item.project_id,\n        callback_url: item.callback_url,\n        total_scenes: scenes.length\n      }\n    }));\n    return result;\n  } catch(e) {\n    return [{ json: { error: 'Errore parsing PROMPTS: ' + e.message } }];\n  }\n}\n\n// Altrimenti estrai dall'output dell'AI Agent (SRT)\nconst response = item.output || item.text || '';\nconst start = response.indexOf('[');\nconst end = response.lastIndexOf(']') + 1;\nif (start === -1 || end === 0) {\n  return [{ json: { error: 'JSON non trovato nell output AI', raw: response.slice(0, 200) } }];\n}\ntry {\n  const scenes = JSON.parse(response.substring(start, end));\n  return scenes.map(s => ({\n    json: {\n      scene_index: s.scene_index !== undefined ? s.scene_index : 0,\n      prompt: s.prompt || s.description || '',\n      project_id: item.project_id,\n      callback_url: item.callback_url,\n      total_scenes: scenes.length\n    }\n  }));\n} catch(e) {\n  return [{ json: { error: 'Errore parsing JSON AI: ' + e.message } }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 0],
+      "id": "code-extract-scenes",
+      "name": "Estrai Scene"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1440, 0],
+      "id": "loop-scenes",
+      "name": "Loop Scena per Scena"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "strict", "version": 3 },
+          "conditions": [
+            {
+              "leftValue": "={{ $node['Loop Scena per Scena'].context.currentRunIndex }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [1680, 0],
+      "id": "if-is-master",
+      "name": "È Master (Scena 0)?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.callback_url }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"type\": \"scene_prompt_ready\",\n  \"project_id\": \"{{ $json.project_id }}\",\n  \"scene_index\": {{ $json.scene_index }},\n  \"prompt\": {{ JSON.stringify($json.prompt) }},\n  \"total_scenes\": {{ $json.total_scenes }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [1920, -240],
+      "id": "notify-scene-start-master",
+      "name": "Notifica Inizio Master"
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.0-flash-exp-image-generation",
+          "mode": "id"
+        },
+        "prompt": "=Genera un'immagine fotorealistica VERTICALE 9:16 basata su questo prompt:\n\n{{ $('Loop Scena per Scena').item.json.prompt }}\n\nIMPORTANTE: Descrivi con massimo dettaglio il volto, capelli, barba, abbigliamento e corporatura del soggetto principale. Questa sarà l'immagine MASTER di riferimento per tutte le scene successive. Stile: raw handheld UGC documentary realism, cool desaturated shadows + warm highlights. NO testo visibile, NO loghi.",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [2160, -320],
+      "id": "gemini-generate-master",
+      "name": "Genera Immagine Master",
+      "credentials": {
+        "googlePalmApi": { "id": "dnbbRSUCugtSYmWq", "name": "Google Gemini(PaLM) Api account" }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "upload",
+        "driveId": { "__rl": true, "mode": "list", "value": "My Drive" },
+        "folderId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "INSERISCI_ID_CARTELLA_DRIVE"
+        },
+        "fileContent": "data",
+        "fileName": "=master_scene_{{ $node['Loop Scena per Scena'].context.currentRunIndex }}_{{ $('Loop Scena per Scena').item.json.project_id }}.png",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [2400, -320],
+      "id": "drive-upload-master",
+      "name": "Upload Master su Drive",
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "YOUR_GOOGLE_DRIVE_CRED_ID", "name": "Google Drive account" }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "share",
+        "fileId": "={{ $json.id }}",
+        "permissions": { "role": "reader", "type": "anyone" }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [2640, -320],
+      "id": "drive-share-master",
+      "name": "Rendi Pubblico Master",
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "YOUR_GOOGLE_DRIVE_CRED_ID", "name": "Google Drive account" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Salva il Drive ID del Master nella memoria globale del workflow\n// Usiamo il context statico di n8n tramite variabile nel nodo stesso\nconst driveId = items[0].json.id;\n// Aggiunge il driveId all'item per il passaggio successivo\nreturn [{ json: { ...items[0].json, master_drive_id: driveId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2880, -320],
+      "id": "code-save-master-id",
+      "name": "Salva Master Drive ID"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Loop Scena per Scena').item.json.callback_url }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"type\": \"master_image_ready\",\n  \"project_id\": \"{{ $('Loop Scena per Scena').item.json.project_id }}\",\n  \"scene_index\": 0,\n  \"image_url\": \"https://drive.google.com/uc?id={{ $json.master_drive_id }}&export=download\",\n  \"prompt\": {{ JSON.stringify($('Loop Scena per Scena').item.json.prompt) }},\n  \"total_scenes\": {{ $('Loop Scena per Scena').item.json.total_scenes }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [3120, -320],
+      "id": "notify-bridge-master",
+      "name": "Notifica Bridge - Master Pronto"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Loop Scena per Scena').item.json.callback_url }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"type\": \"scene_prompt_ready\",\n  \"project_id\": \"{{ $('Loop Scena per Scena').item.json.project_id }}\",\n  \"scene_index\": {{ $('Loop Scena per Scena').item.json.scene_index }},\n  \"prompt\": {{ JSON.stringify($('Loop Scena per Scena').item.json.prompt) }},\n  \"total_scenes\": {{ $('Loop Scena per Scena').item.json.total_scenes }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [1920, 200],
+      "id": "notify-scene-start-derived",
+      "name": "Notifica Inizio Scena Derivata"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://drive.google.com/uc?id={{ $('Salva Master Drive ID').item.json.master_drive_id }}&export=download",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Accept", "value": "image/*" }]
+        },
+        "options": {
+          "response": { "response": { "responseFormat": "file" } }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [2160, 200],
+      "id": "download-master-for-derived",
+      "name": "Scarica Immagine Master"
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "operation": "analyze",
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-flash",
+          "mode": "id"
+        },
+        "text": "=Sei un art director di continuità visiva.\n\nHai davanti l'IMMAGINE MASTER che stabilisce l'identità visiva del personaggio principale.\n\nAnalizza e descrivi con precisione:\n1. Tratti somatici del viso (forma, pelle, occhi, naso, bocca)\n2. Capelli e barba (colore, lunghezza, stile)\n3. Abbigliamento (ogni capo, colore, materiale visibile)\n4. Corporatura e postura generale\n\nOra scrivi un PROMPT VISIVO per la SCENA {{ $('Loop Scena per Scena').item.json.scene_index }} che:\n- Mantenga IDENTICI tutti i tratti del soggetto Master sopra descritti\n- Rappresenti questa azione: {{ $('Loop Scena per Scena').item.json.prompt }}\n- Usi lo stile: raw handheld UGC documentary realism, vertical 9:16, cool desaturated shadows + warm highlights, 35mm look\n- NON mostri testo, loghi o UI visibili\n\nRispondi SOLO con il prompt visivo finale, pronto per Kie.ai.",
+        "inputType": "binary",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [2400, 200],
+      "id": "gemini-analyze-master",
+      "name": "Analizza Master + Crea Prompt",
+      "credentials": {
+        "googlePalmApi": { "id": "dnbbRSUCugtSYmWq", "name": "Google Gemini(PaLM) Api account" }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.kie.ai/api/v1/veo/generate",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"prompt\": {{ JSON.stringify($json.text) }},\n  \"imageUrls\": [\n    \"https://drive.google.com/uc?id={{ $('Salva Master Drive ID').item.json.master_drive_id }}&export=download\"\n  ],\n  \"model\": \"veo3_fast\",\n  \"aspect_ratio\": \"9:16\",\n  \"seeds\": {{ Math.floor(Math.random() * 100000) }},\n  \"enableFallback\": false,\n  \"enableTranslation\": true,\n  \"generationType\": \"REFERENCE_2_VIDEO\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [2640, 120],
+      "id": "kie-ai-derived",
+      "name": "Kie.ai - Genera Video Scena",
+      "credentials": {
+        "httpHeaderAuth": { "id": "2EwOR9Zf0UoAu05f", "name": "Header Auth Kie.AI" }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.kie.ai/api/v1/veo/generate",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"prompt\": {{ JSON.stringify($('Loop Scena per Scena').item.json.prompt) }},\n  \"imageUrls\": [\n    \"https://drive.google.com/uc?id={{ $('Salva Master Drive ID').item.json.master_drive_id }}&export=download\"\n  ],\n  \"model\": \"veo3_fast\",\n  \"aspect_ratio\": \"9:16\",\n  \"seeds\": {{ Math.floor(Math.random() * 100000) }},\n  \"enableFallback\": false,\n  \"enableTranslation\": true,\n  \"generationType\": \"REFERENCE_2_VIDEO\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [3360, -320],
+      "id": "kie-ai-master",
+      "name": "Kie.ai - Genera Video Master",
+      "credentials": {
+        "httpHeaderAuth": { "id": "2EwOR9Zf0UoAu05f", "name": "Header Auth Kie.AI" }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Loop Scena per Scena').item.json.callback_url }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"type\": \"video_job_started\",\n  \"project_id\": \"{{ $('Loop Scena per Scena').item.json.project_id }}\",\n  \"scene_index\": {{ $('Loop Scena per Scena').item.json.scene_index }},\n  \"job_id\": \"{{ $json.data.taskId || $json.job_id || $json.id }}\",\n  \"image_url\": \"https://drive.google.com/uc?id={{ $('Salva Master Drive ID').item.json.master_drive_id }}&export=download\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [2880, 120],
+      "id": "notify-bridge-job-derived",
+      "name": "Notifica Bridge - Job Video Derivata"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Loop Scena per Scena').item.json.callback_url }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"type\": \"video_job_started\",\n  \"project_id\": \"{{ $('Loop Scena per Scena').item.json.project_id }}\",\n  \"scene_index\": 0,\n  \"job_id\": \"{{ $json.data.taskId || $json.job_id || $json.id }}\",\n  \"image_url\": \"https://drive.google.com/uc?id={{ $('Salva Master Drive ID').item.json.master_drive_id }}&export=download\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [3600, -320],
+      "id": "notify-bridge-job-master",
+      "name": "Notifica Bridge - Job Video Master"
+    },
+    {
+      "parameters": { "options": {} },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [3120, 120],
+      "id": "merge-back-to-loop",
+      "name": "Merge per Loop"
+    }
+  ],
+  "connections": {
+    "Webhook Entrata": {
+      "main": [[{ "node": "Switch Tipo Input", "type": "main", "index": 0 }]]
+    },
+    "Switch Tipo Input": {
+      "main": [
+        [{ "node": "Parse SRT", "type": "main", "index": 0 }],
+        [{ "node": "Parse PROMPTS", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse SRT": {
+      "main": [[{ "node": "Skip AI se PROMPTS", "type": "main", "index": 0 }]]
+    },
+    "Parse PROMPTS": {
+      "main": [[{ "node": "Skip AI se PROMPTS", "type": "main", "index": 0 }]]
+    },
+    "Skip AI se PROMPTS": {
+      "main": [
+        [{ "node": "Estrai Scene", "type": "main", "index": 0 }],
+        [{ "node": "AI Agent - Genera Prompt da SRT", "type": "main", "index": 0 }]
+      ]
+    },
+    "Gemini 2.5 Pro (SRT Agent)": {
+      "ai_languageModel": [[{ "node": "AI Agent - Genera Prompt da SRT", "type": "ai_languageModel", "index": 0 }]]
+    },
+    "AI Agent - Genera Prompt da SRT": {
+      "main": [[{ "node": "Estrai Scene", "type": "main", "index": 0 }]]
+    },
+    "Estrai Scene": {
+      "main": [[{ "node": "Loop Scena per Scena", "type": "main", "index": 0 }]]
+    },
+    "Loop Scena per Scena": {
+      "main": [[{ "node": "È Master (Scena 0)?", "type": "main", "index": 0 }]]
+    },
+    "È Master (Scena 0)?": {
+      "main": [
+        [{ "node": "Notifica Inizio Master", "type": "main", "index": 0 }],
+        [{ "node": "Notifica Inizio Scena Derivata", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notifica Inizio Master": {
+      "main": [[{ "node": "Genera Immagine Master", "type": "main", "index": 0 }]]
+    },
+    "Genera Immagine Master": {
+      "main": [[{ "node": "Upload Master su Drive", "type": "main", "index": 0 }]]
+    },
+    "Upload Master su Drive": {
+      "main": [[{ "node": "Rendi Pubblico Master", "type": "main", "index": 0 }]]
+    },
+    "Rendi Pubblico Master": {
+      "main": [[{ "node": "Salva Master Drive ID", "type": "main", "index": 0 }]]
+    },
+    "Salva Master Drive ID": {
+      "main": [[{ "node": "Notifica Bridge - Master Pronto", "type": "main", "index": 0 }]]
+    },
+    "Notifica Bridge - Master Pronto": {
+      "main": [[{ "node": "Kie.ai - Genera Video Master", "type": "main", "index": 0 }]]
+    },
+    "Kie.ai - Genera Video Master": {
+      "main": [[{ "node": "Notifica Bridge - Job Video Master", "type": "main", "index": 0 }]]
+    },
+    "Notifica Bridge - Job Video Master": {
+      "main": [[{ "node": "Merge per Loop", "type": "main", "index": 0 }]]
+    },
+    "Notifica Inizio Scena Derivata": {
+      "main": [[{ "node": "Scarica Immagine Master", "type": "main", "index": 0 }]]
+    },
+    "Scarica Immagine Master": {
+      "main": [[{ "node": "Analizza Master + Crea Prompt", "type": "main", "index": 0 }]]
+    },
+    "Analizza Master + Crea Prompt": {
+      "main": [[{ "node": "Kie.ai - Genera Video Scena", "type": "main", "index": 0 }]]
+    },
+    "Kie.ai - Genera Video Scena": {
+      "main": [[{ "node": "Notifica Bridge - Job Video Derivata", "type": "main", "index": 0 }]]
+    },
+    "Notifica Bridge - Job Video Derivata": {
+      "main": [[{ "node": "Merge per Loop", "type": "main", "index": 0 }]]
+    },
+    "Merge per Loop": {
+      "main": [[{ "node": "Loop Scena per Scena", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "_note": "Sostituisci: YOUR_GOOGLE_DRIVE_CRED_ID, INSERISCI_ID_CARTELLA_DRIVE, e gli URL del Bridge nei nodi HTTP Request"
+  }
+}

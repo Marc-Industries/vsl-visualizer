@@ -1,0 +1,5 @@
+{
+  "name": "VSL Visualizer Flow",
+  "description": "An automation-style workflow tool that converts video transcripts into timed image generation prompts using Gemini AI.",
+  "requestFramePermissions": []
+}
