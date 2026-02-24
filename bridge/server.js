@@ -222,6 +222,7 @@ setInterval(() => {
   }
 }, 30 * 60 * 1000);
 
+const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   const bridgeUrl = process.env.BRIDGE_URL || `http://localhost:${PORT}`;
   console.log(`\n🚀 Antigravity Bridge in ascolto su ${bridgeUrl}`);
