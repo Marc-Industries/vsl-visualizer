@@ -78,8 +78,19 @@ function upsertScene(projectId, sceneIndex, data) {
 app.post('/update-scene', (req, res) => {
   const { type, project_id, scene_index, image_url, job_id, prompt, total_scenes } = req.body;
 
-  if (!project_id || scene_index === undefined) {
-    return res.status(400).json({ error: 'project_id e scene_index sono obbligatori' });
+  if (!project_id) {
+    return res.status(400).json({ error: 'project_id è obbligatorio' });
+  }
+
+  // Se è un segnale di completamento globale
+  if (type === 'project_completed') {
+    io.to(`project:${project_id}`).emit('project_completed', { projectId: project_id });
+    console.log(`[Bridge] PROJECT COMPLETED | project=${project_id}`);
+    return res.json({ ok: true, status: 'completed' });
+  }
+
+  if (scene_index === undefined) {
+    return res.status(400).json({ error: 'scene_index è obbligatorio per gli aggiornamenti di scena' });
   }
 
   const project = getOrCreateProject(project_id, total_scenes || 0);
