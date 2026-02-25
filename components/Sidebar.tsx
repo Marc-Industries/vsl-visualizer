@@ -1,5 +1,5 @@
 import React from 'react';
-import { Workflow, Film, Settings, Menu } from 'lucide-react';
+import { Workflow, Film, Settings, Menu, Database } from 'lucide-react';
 import { ActiveTab } from '../types';
 
 interface SidebarProps {
@@ -10,6 +10,7 @@ interface SidebarProps {
   labels: {
     workflow: string;
     editor: string;
+    bridge: string;
     settings: string;
   }
 }
@@ -60,6 +61,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isOpe
             >
               <Film size={20} />
               {labels.editor}
+            </button>
+
+            <button
+              onClick={() => setActiveTab('bridge')}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium ${activeTab === 'bridge'
+                ? 'bg-blue-500/20 text-white border border-blue-500/50'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }`}
+            >
+              <Database size={20} />
+              {labels.bridge}
             </button>
 
             <button
