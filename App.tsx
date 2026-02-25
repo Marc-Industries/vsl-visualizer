@@ -107,12 +107,12 @@ function App() {
                     error: scene.status === 'error' ? 'Errore dal Bridge' : seg.error,
                 };
             }));
-            // Se tutte le scene hanno un'immagine → COMPLETED
-            setSegments(prev => {
-                const allDone = prev.every(s => s.imageUrl || s.error);
-                if (allDone) setStatus(FlowStatus.COMPLETED);
-                return prev;
-            });
+        });
+
+        // Riceve il segnale di completamento globale
+        socket.on('project_completed', () => {
+            console.log('[Bridge] Project Completed received');
+            setStatus(FlowStatus.COMPLETED);
         });
 
         return () => { socket.disconnect(); };
