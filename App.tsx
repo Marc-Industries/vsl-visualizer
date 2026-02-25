@@ -72,7 +72,13 @@ function App() {
 
     // Bridge / Socket.io state
     const [isBridgeConnected, setIsBridgeConnected] = useState(false);
-    const [projectId] = useState<string>(() => `proj_${Date.now()}`);
+    const [projectId] = useState<string>(() => {
+        const saved = localStorage.getItem('vsl_project_id');
+        if (saved) return saved;
+        const newId = `proj_${Date.now()}`;
+        localStorage.setItem('vsl_project_id', newId);
+        return newId;
+    });
     const socketRef = useRef<Socket | null>(null);
 
     const t = TRANSLATIONS[lang];
@@ -92,22 +98,61 @@ function App() {
         });
         socket.on('disconnect', () => setIsBridgeConnected(false));
 
+        // RECUPERO STATO INIZIALE (per reload o join tardivo)
+        socket.on('project_state', (project: { projectId: string; totalScenes: number; scenes: any[] }) => {
+            console.log('[Bridge] Project state received:', project);
+            if (project.scenes && project.scenes.length > 0) {
+                const recoveredSegments: TimelineSegment[] = project.scenes.map(scene => ({
+                    id: generateUUID(),
+                    startTime: scene.sceneIndex * config.intervalSeconds,
+                    endTime: (scene.sceneIndex + 1) * config.intervalSeconds,
+                    originalText: `Scena ${scene.sceneIndex}`,
+                    generatedPrompt: scene.prompt || '',
+                    imageUrl: scene.imageUrl || '',
+                    videoUrl: scene.videoUrl || '',
+                    jobId: scene.jobId || '',
+                    isProcessingPrompt: false,
+                    isProcessingImage: scene.status === 'processing' || scene.status === 'scene_prompt_ready',
+                    isProcessingVideo: scene.status === 'generating_video' || (!!scene.jobId && !scene.videoUrl),
+                }));
+                setSegments(recoveredSegments);
+            }
+        });
+
         // Riceve aggiornamenti in tempo reale da n8n tramite il Bridge
-        socket.on('scene_update', ({ scene }: { scene: { sceneIndex: number; status: string; imageUrl?: string; videoUrl?: string; prompt?: string; jobId?: string; } }) => {
-            setSegments(prev => prev.map((seg, index) => {
-                if (index !== scene.sceneIndex) return seg;
-                return {
-                    ...seg,
-                    generatedPrompt: scene.prompt || seg.generatedPrompt,
-                    imageUrl: scene.imageUrl || seg.imageUrl,
-                    videoUrl: scene.videoUrl || seg.videoUrl,
-                    jobId: scene.jobId || seg.jobId,
-                    isProcessingPrompt: scene.status === 'processing',
-                    isProcessingImage: scene.status === 'processing' || scene.status === 'scene_prompt_ready' || scene.status === 'image_ready',
-                    isProcessingVideo: scene.status === 'generating_video',
-                    error: scene.status === 'error' ? 'Errore dal Bridge' : seg.error,
-                };
-            }));
+        socket.on('scene_update', ({ scene, totalScenes }: { scene: { sceneIndex: number; status: string; imageUrl?: string; videoUrl?: string; prompt?: string; jobId?: string; }, totalScenes?: number }) => {
+            setSegments(prev => {
+                // Se non abbiamo ancora segmenti (es: workflow partito solo su n8n), li inizializziamo
+                if (prev.length === 0 && (totalScenes || (scene.sceneIndex !== undefined))) {
+                    const count = totalScenes || (scene.sceneIndex + 1);
+                    const initial = Array.from({ length: count }).map((_, i) => ({
+                        id: generateUUID(),
+                        startTime: i * config.intervalSeconds,
+                        endTime: (i + 1) * config.intervalSeconds,
+                        originalText: `Scena ${i}`,
+                        generatedPrompt: '',
+                        isProcessingPrompt: false,
+                        isProcessingImage: false,
+                        isProcessingVideo: false,
+                    }));
+                    prev = initial;
+                }
+
+                return prev.map((seg, index) => {
+                    if (index !== scene.sceneIndex) return seg;
+                    return {
+                        ...seg,
+                        generatedPrompt: scene.prompt || seg.generatedPrompt,
+                        imageUrl: scene.imageUrl || seg.imageUrl,
+                        videoUrl: scene.videoUrl || seg.videoUrl,
+                        jobId: scene.jobId || seg.jobId,
+                        isProcessingPrompt: scene.status === 'processing',
+                        isProcessingImage: scene.status === 'processing' || scene.status === 'scene_prompt_ready',
+                        isProcessingVideo: scene.status === 'generating_video',
+                        error: scene.status === 'error' ? 'Errore dal Bridge' : seg.error,
+                    };
+                });
+            });
         });
 
         // Riceve il segnale di completamento globale
@@ -117,12 +162,13 @@ function App() {
         });
 
         return () => { socket.disconnect(); };
-    }, [projectId]);
+    }, [projectId, config.intervalSeconds]);
 
     // --- Video Polling Logic (Bridge Proxy) ---
     useEffect(() => {
         const checkVideoStatus = async () => {
-            const pendingVideos = segments.filter(s => s.jobId && !s.videoUrl && s.isProcessingVideo);
+            // Se abbiamo un jobId e non abbiamo ancora il videoUrl, controlliamo
+            const pendingVideos = segments.filter(s => s.jobId && !s.videoUrl);
             if (pendingVideos.length === 0) return;
 
             for (const seg of pendingVideos) {
@@ -131,11 +177,13 @@ function App() {
                     if (!res.ok) continue;
 
                     const data = await res.json();
-                    if (data.status === 'COMPLETED' && data.video_url) {
+                    const status = data.status?.toUpperCase();
+
+                    if ((status === 'COMPLETED' || status === 'SUCCESS') && data.video_url) {
                         setSegments(prev => prev.map(s =>
                             s.id === seg.id ? { ...s, videoUrl: data.video_url, isProcessingVideo: false } : s
                         ));
-                    } else if (data.status === 'FAILED') {
+                    } else if (status === 'FAILED' || status === 'ERROR') {
                         setSegments(prev => prev.map(s =>
                             s.id === seg.id ? { ...s, isProcessingVideo: false, error: 'Kie.ai failed' } : s
                         ));
@@ -857,15 +905,30 @@ function App() {
                                 </h1>
                                 <p className="text-slate-400">Visualizzazione in tempo reale degli asset generati tramite n8n + Bridge.</p>
 
-                                <div className="flex justify-center mt-6">
+                                <div className="flex flex-col items-center gap-4 mt-6">
                                     <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold border ${isBridgeConnected
                                         ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
                                         : 'bg-red-950/40 border-red-700/40 text-red-400'
                                         }`}>
                                         {isBridgeConnected
-                                            ? <><Wifi size={12} /> Bridge attivo sul Progetto: {projectId}</>
+                                            ? <><Wifi size={12} /> Bridge attivo</>
                                             : <><WifiOff size={12} /> Disconnesso dal Bridge</>
                                         }
+                                    </div>
+
+                                    <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs">
+                                        <span className="text-slate-500 uppercase font-bold tracking-widest">Project ID:</span>
+                                        <code className="text-blue-400 font-mono font-bold">{projectId}</code>
+                                        <button
+                                            onClick={() => {
+                                                navigator.clipboard.writeText(projectId);
+                                                alert('Project ID copiato!');
+                                            }}
+                                            className="ml-2 text-slate-400 hover:text-white"
+                                            title="Copia ID"
+                                        >
+                                            <Copy size={14} />
+                                        </button>
                                     </div>
                                 </div>
                             </header>
