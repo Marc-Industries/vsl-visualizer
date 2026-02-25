@@ -57,6 +57,7 @@ export const TRANSLATIONS = {
     nav: {
       workflow: "Workflow",
       editor: "Video Editor",
+      bridge: "Bridge Results",
       settings: "Settings"
     },
     editor: {
@@ -144,6 +145,7 @@ Your task is to take the provided script segment and generate a single Nano Bana
     nav: {
       workflow: "Workflow",
       editor: "Editor Video",
+      bridge: "Risultati Bridge",
       settings: "Impostazioni"
     },
     editor: {
