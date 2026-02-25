@@ -93,7 +93,7 @@ function App() {
         socket.on('disconnect', () => setIsBridgeConnected(false));
 
         // Riceve aggiornamenti in tempo reale da n8n tramite il Bridge
-        socket.on('scene_update', ({ scene }: { scene: { sceneIndex: number; status: string; imageUrl?: string; videoUrl?: string; prompt?: string; } }) => {
+        socket.on('scene_update', ({ scene }: { scene: { sceneIndex: number; status: string; imageUrl?: string; videoUrl?: string; prompt?: string; jobId?: string; } }) => {
             setSegments(prev => prev.map((seg, index) => {
                 if (index !== scene.sceneIndex) return seg;
                 return {
@@ -101,8 +101,9 @@ function App() {
                     generatedPrompt: scene.prompt || seg.generatedPrompt,
                     imageUrl: scene.imageUrl || seg.imageUrl,
                     videoUrl: scene.videoUrl || seg.videoUrl,
+                    jobId: scene.jobId || seg.jobId,
                     isProcessingPrompt: scene.status === 'processing',
-                    isProcessingImage: scene.status === 'processing' || scene.status === 'scene_prompt_ready',
+                    isProcessingImage: scene.status === 'processing' || scene.status === 'scene_prompt_ready' || scene.status === 'image_ready',
                     isProcessingVideo: scene.status === 'generating_video',
                     error: scene.status === 'error' ? 'Errore dal Bridge' : seg.error,
                 };
@@ -117,6 +118,37 @@ function App() {
 
         return () => { socket.disconnect(); };
     }, [projectId]);
+
+    // --- Video Polling Logic (Bridge Proxy) ---
+    useEffect(() => {
+        const checkVideoStatus = async () => {
+            const pendingVideos = segments.filter(s => s.jobId && !s.videoUrl && s.isProcessingVideo);
+            if (pendingVideos.length === 0) return;
+
+            for (const seg of pendingVideos) {
+                try {
+                    const res = await fetch(`${BRIDGE_URL}/proxy/kie-status/${seg.jobId}`);
+                    if (!res.ok) continue;
+
+                    const data = await res.json();
+                    if (data.status === 'COMPLETED' && data.video_url) {
+                        setSegments(prev => prev.map(s =>
+                            s.id === seg.id ? { ...s, videoUrl: data.video_url, isProcessingVideo: false } : s
+                        ));
+                    } else if (data.status === 'FAILED') {
+                        setSegments(prev => prev.map(s =>
+                            s.id === seg.id ? { ...s, isProcessingVideo: false, error: 'Kie.ai failed' } : s
+                        ));
+                    }
+                } catch (err) {
+                    console.error('Polling error:', err);
+                }
+            }
+        };
+
+        const interval = setInterval(checkVideoStatus, 5000); // Polling ogni 5 secondi
+        return () => clearInterval(interval);
+    }, [segments]);
 
     // Toggle Language
     const toggleLanguage = () => {
@@ -817,7 +849,74 @@ function App() {
 
                     {activeTab === 'settings' && renderSettings()}
 
+                    {activeTab === 'bridge' && (
+                        <div className="animate-in fade-in duration-700">
+                            <header className="mb-10 text-center">
+                                <h1 className="text-4xl font-bold text-white mb-2 tracking-tight">
+                                    {t.nav.bridge} <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-primary">Live</span>
+                                </h1>
+                                <p className="text-slate-400">Visualizzazione in tempo reale degli asset generati tramite n8n + Bridge.</p>
 
+                                <div className="flex justify-center mt-6">
+                                    <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold border ${isBridgeConnected
+                                        ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
+                                        : 'bg-red-950/40 border-red-700/40 text-red-400'
+                                        }`}>
+                                        {isBridgeConnected
+                                            ? <><Wifi size={12} /> Bridge attivo sul Progetto: {projectId}</>
+                                            : <><WifiOff size={12} /> Disconnesso dal Bridge</>
+                                        }
+                                    </div>
+                                </div>
+                            </header>
+
+                            {segments.length === 0 ? (
+                                <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-12 text-center">
+                                    <Database size={48} className="mx-auto text-slate-700 mb-4 opacity-50" />
+                                    <h3 className="text-lg font-bold text-slate-300 mb-2">In attesa di dati...</h3>
+                                    <p className="text-slate-500 max-w-md mx-auto">
+                                        Avvia un workflow dalla scheda "Workflow" per iniziare a ricevere aggiornamenti in tempo reale in questa sezione.
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="space-y-6">
+                                    <div className="flex justify-between items-center bg-slate-800/50 p-4 rounded-xl border border-slate-700">
+                                        <div className="flex items-center gap-4">
+                                            <div className="flex flex-col">
+                                                <span className="text-xs text-slate-500 uppercase font-bold tracking-widest">Status Progetto</span>
+                                                <span className={`text-sm font-bold ${status === FlowStatus.COMPLETED ? 'text-emerald-400' : 'text-blue-400'}`}>
+                                                    {status === FlowStatus.COMPLETED ? '✓ COMPLETATO' : '⚡ IN ELABORAZIONE...'}
+                                                </span>
+                                            </div>
+                                            <div className="w-px h-8 bg-slate-700 mx-2"></div>
+                                            <div className="flex flex-col">
+                                                <span className="text-xs text-slate-500 uppercase font-bold tracking-widest">Asset</span>
+                                                <span className="text-sm font-bold text-white">{segments.filter(s => s.imageUrl).length} / {segments.length}</span>
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={copyAllPrompts}
+                                            className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-bold transition-all"
+                                        >
+                                            {t.copyAll}
+                                        </button>
+                                    </div>
+
+                                    <div className="grid gap-6">
+                                        {segments.map((segment) => (
+                                            <TimelineCard
+                                                key={segment.id}
+                                                segment={segment}
+                                                onRegeneratePrompt={() => { }}
+                                                onRegenerateImage={() => { }}
+                                                labels={t.timeline}
+                                            />
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
             </main>
         </div>
