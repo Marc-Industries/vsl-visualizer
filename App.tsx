@@ -14,7 +14,9 @@ import {
     HardDrive,
     Key,
     Wifi,
-    WifiOff
+    WifiOff,
+    Trash2,
+    Download
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 import { FlowCanvas } from './components/FlowCanvas';
@@ -393,6 +395,17 @@ function App() {
 
 
 
+    // --- Actions ---
+    const cleanCache = () => {
+        if (window.confirm(t.cleanCacheConfirm)) {
+            localStorage.clear();
+            setSegments([]);
+            const newId = `proj_${Date.now()}`;
+            localStorage.setItem('vsl_project_id', newId);
+            window.location.reload();
+        }
+    };
+
     // Handler: Regenerate Just Prompt
     const handleRegeneratePrompt = async (id: string) => {
         const segmentIndex = segments.findIndex(s => s.id === id);
@@ -434,28 +447,43 @@ function App() {
     };
 
 
-    // Handler: Regenerate Image (Edit/Fix)
-    const handleRegenerateImage = async (id: string, feedback?: string) => {
-        const segment = segments.find(s => s.id === id);
-        if (!segment || !segment.generatedPrompt) return;
+    // Handler: Regenerate Just Video
+    const handleRegenerateVideo = async (id: string) => {
+        const segmentIndex = segments.findIndex(s => s.id === id);
+        if (segmentIndex === -1) return;
 
-        setSegments(prev => prev.map(s => s.id === id ? { ...s, isProcessingImage: true, videoUrl: undefined } : s));
+        setSegments(prev => prev.map(s => s.id === id ? { ...s, isProcessingVideo: true, videoUrl: undefined } : s));
 
         try {
-            let newImage: string | undefined;
-
-            if (feedback && segment.imageUrl) {
-                newImage = await editImageWithFeedback(segment.imageUrl, segment.generatedPrompt, feedback);
-            } else {
-                newImage = await generateImageFromPrompt(segment.generatedPrompt);
-            }
-
-            setSegments(prev => prev.map(s => s.id === id ? { ...s, isProcessingImage: false, imageUrl: newImage } : s));
-        } catch (e) {
-            setSegments(prev => prev.map(s => s.id === id ? { ...s, isProcessingImage: false } : s));
-            alert("Failed to regenerate image. Try again.");
+            await sendToWebhook(config.webhookUrl || '', {
+                type: 'SRT', // Dummy type to satisfy interface, Bridge will handle the logic
+                content: segments[segmentIndex].generatedPrompt || '',
+                callback_url: `${BRIDGE_URL}/update-scene`,
+                project_id: projectId,
+                scene_index: segmentIndex,
+                regen_type: 'video'
+            } as any);
+        } catch (err) {
+            console.error("Regen Video Error:", err);
+            setSegments(prev => prev.map(s => s.id === id ? { ...s, isProcessingVideo: false, error: 'Regen Failed' } : s));
         }
     };
+
+    const handleDownloadVideo = (url: string) => {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `video-segment-${Date.now()}.mp4`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    };
+
+    const handleRemoveSegment = (index: number) => {
+        if (window.confirm("Rimuovere questo segmento dalla timeline?")) {
+            setSegments(prev => prev.filter((_, i) => i !== index));
+        }
+    };
+
 
 
     const copyAllPrompts = () => {
@@ -665,7 +693,8 @@ function App() {
                                     key={segment.id}
                                     segment={segment}
                                     onRegeneratePrompt={inputMode === 'SRT' ? handleRegeneratePrompt : () => { }}
-                                    onRegenerateImage={handleRegenerateImage}
+                                    onRegenerateVideo={handleRegenerateVideo}
+                                    onDownloadVideo={handleDownloadVideo}
                                     labels={t.timeline}
                                 />
                             ))}
@@ -711,21 +740,40 @@ function App() {
                     </div>
                 </div>
 
-                {/* Drive Integration */}
-                <div>
-                    <h3 className="text-lg font-semibold text-slate-200 mb-2">{t.settings.driveSection}</h3>
-                    <p className="text-sm text-slate-500 mb-4">{t.settings.driveDesc}</p>
-                    <button className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-medium transition-colors">
-                        <HardDrive size={18} />
+                {/* Local Asset Connection */}
+                <div className="mb-8">
+                    <h3 className="text-lg font-semibold text-slate-200 mb-2 flex items-center gap-2">
+                        <HardDrive size={18} className="text-emerald-400" />
                         {t.settings.driveConnect}
-                    </button>
-                    <p className="text-xs text-slate-600 mt-2 italic">Feature coming soon (Mockup)</p>
+                    </h3>
+                    <p className="text-sm text-slate-500 mb-4">{t.settings.driveDesc}</p>
+
+                    <div className="flex gap-2 mb-2">
+                        <input
+                            type="text"
+                            readOnly
+                            placeholder="C:\Users\...\Videos\VSL_Assets"
+                            className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-4 py-2.5 text-xs text-slate-500 font-mono outline-none"
+                        />
+                        <button
+                            className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-xs font-bold transition-all border border-slate-700"
+                        >
+                            Browse...
+                        </button>
+                    </div>
+                    <p className="text-[10px] text-amber-500 italic mt-1 flex items-center gap-1">
+                        <Clock size={10} /> Feature coming soon (Mockup)
+                    </p>
                 </div>
 
                 <div className="mt-8 flex justify-end">
                     <button
-                        onClick={() => setActiveTab('workflow')}
-                        className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2 rounded-lg font-bold shadow-lg shadow-emerald-900/20"
+                        onClick={() => {
+                            // Simuliamo il salvataggio
+                            alert(t.settings.save + " OK");
+                            setActiveTab('workflow');
+                        }}
+                        className="bg-emerald-600 hover:bg-emerald-500 text-white px-8 py-3 rounded-xl font-bold shadow-lg shadow-emerald-900/40 transform hover:scale-105 transition-all flex items-center gap-2"
                     >
                         {t.settings.save}
                     </button>
@@ -756,6 +804,22 @@ function App() {
                     <span className="text-xl leading-none">{lang === 'it' ? '🇮🇹' : '🇺🇸'}</span>
                     <span className="text-sm font-bold text-white uppercase">{lang}</span>
                 </button>
+
+                <button
+                    onClick={cleanCache}
+                    title={t.cleanCache}
+                    className="flex items-center gap-2 bg-slate-800 hover:bg-red-900/40 border border-slate-700 hover:border-red-500/50 rounded-full px-4 py-2 transition-all shadow-lg hover:shadow-xl text-slate-400 hover:text-red-400 mt-2"
+                >
+                    <Trash2 size={16} />
+                    <span className="text-xs font-bold uppercase">{t.cleanCache}</span>
+                </button>
+
+                <div className="mt-4 text-right">
+                    <span className="text-[10px] text-slate-500 font-mono uppercase tracking-widest block">Project ID</span>
+                    <span className="text-xs text-slate-400 font-mono font-bold blur-[2px] hover:blur-none transition-all cursor-help" title="Click to copy fully">
+                        {projectId}
+                    </span>
+                </div>
             </div>
 
             <main className="relative z-10 md:pl-64 transition-all duration-300">
@@ -767,7 +831,11 @@ function App() {
                             <div className="mb-6">
                                 <h1 className="text-2xl font-bold text-white">{t.editor.title}</h1>
                             </div>
-                            <VideoEditor segments={segments} labels={t.editor} />
+                            <VideoEditor
+                                segments={segments}
+                                labels={t.editor}
+                                onRemoveSegment={handleRemoveSegment}
+                            />
                         </div>
                     )}
 
