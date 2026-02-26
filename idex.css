@@ -1,0 +1,9 @@
+/* Main CSS file for VSL Visualizer Flow */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+    margin: 0;
+    padding: 0;
+}
