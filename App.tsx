@@ -122,24 +122,27 @@ function App() {
         // Riceve aggiornamenti in tempo reale da n8n tramite il Bridge
         socket.on('scene_update', ({ scene, totalScenes }: { scene: { sceneIndex: number; status: string; imageUrl?: string; videoUrl?: string; prompt?: string; jobId?: string; }, totalScenes?: number }) => {
             setSegments(prev => {
-                // Se non abbiamo ancora segmenti (es: workflow partito solo su n8n), li inizializziamo
-                if (prev.length === 0 && (totalScenes || (scene.sceneIndex !== undefined))) {
-                    const count = totalScenes || (scene.sceneIndex + 1);
-                    const initial = Array.from({ length: count }).map((_, i) => ({
+                let current = [...prev];
+                const targetIndex = scene.sceneIndex;
+                const requiredCount = totalScenes || (targetIndex + 1);
+
+                // Espandi l'array se necessario
+                if (current.length < requiredCount) {
+                    const extra = Array.from({ length: requiredCount - current.length }).map((_, i) => ({
                         id: generateUUID(),
-                        startTime: i * config.intervalSeconds,
-                        endTime: (i + 1) * config.intervalSeconds,
-                        originalText: `Scena ${i}`,
+                        startTime: (current.length + i) * config.intervalSeconds,
+                        endTime: (current.length + i + 1) * config.intervalSeconds,
+                        originalText: `Scena ${current.length + i}`,
                         generatedPrompt: '',
                         isProcessingPrompt: false,
                         isProcessingImage: false,
                         isProcessingVideo: false,
                     }));
-                    prev = initial;
+                    current = [...current, ...extra];
                 }
 
-                return prev.map((seg, index) => {
-                    if (index !== scene.sceneIndex) return seg;
+                return current.map((seg, index) => {
+                    if (index !== targetIndex) return seg;
                     return {
                         ...seg,
                         generatedPrompt: scene.prompt || seg.generatedPrompt,
@@ -167,11 +170,19 @@ function App() {
     // --- Video Polling Logic (Bridge Proxy) ---
     useEffect(() => {
         const checkVideoStatus = async () => {
-            // Se abbiamo un jobId e non abbiamo ancora il videoUrl, controlliamo
-            const pendingVideos = segments.filter(s => s.jobId && !s.videoUrl);
-            if (pendingVideos.length === 0) return;
+            // Usiamo il valore corrente dei segmenti tramite una callback o un ref per evitare loop di dependency
+            setSegments(prev => {
+                const pendingVideos = prev.filter(s => s.jobId && !s.videoUrl && s.isProcessingVideo !== false);
+                if (pendingVideos.length === 0) return prev;
 
-            for (const seg of pendingVideos) {
+                // Non possiamo fare fetch dentro setSegments, quindi facciamo il polling fuori e aggiorniamo dopo
+                return prev;
+            });
+
+            const pending = segments.filter(s => s.jobId && !s.videoUrl);
+            if (pending.length === 0) return;
+
+            for (const seg of pending) {
                 try {
                     const res = await fetch(`${BRIDGE_URL}/proxy/kie-status/${seg.jobId}`);
                     if (!res.ok) continue;
@@ -194,9 +205,10 @@ function App() {
             }
         };
 
-        const interval = setInterval(checkVideoStatus, 5000); // Polling ogni 5 secondi
+        const interval = setInterval(checkVideoStatus, 5000);
         return () => clearInterval(interval);
-    }, [segments]);
+    }, [projectId]); // Polling legato al progetto, non ai segmenti specifici per stabilità 
+
 
     // Toggle Language
     const toggleLanguage = () => {
