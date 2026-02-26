@@ -740,31 +740,6 @@ function App() {
                     </div>
                 </div>
 
-                {/* Local Asset Connection */}
-                <div className="mb-8">
-                    <h3 className="text-lg font-semibold text-slate-200 mb-2 flex items-center gap-2">
-                        <HardDrive size={18} className="text-emerald-400" />
-                        {t.settings.driveConnect}
-                    </h3>
-                    <p className="text-sm text-slate-500 mb-4">{t.settings.driveDesc}</p>
-
-                    <div className="flex gap-2 mb-2">
-                        <input
-                            type="text"
-                            readOnly
-                            placeholder="C:\Users\...\Videos\VSL_Assets"
-                            className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-4 py-2.5 text-xs text-slate-500 font-mono outline-none"
-                        />
-                        <button
-                            className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-xs font-bold transition-all border border-slate-700"
-                        >
-                            Browse...
-                        </button>
-                    </div>
-                    <p className="text-[10px] text-amber-500 italic mt-1 flex items-center gap-1">
-                        <Clock size={10} /> Feature coming soon (Mockup)
-                    </p>
-                </div>
 
                 <div className="mt-8 flex justify-end">
                     <button
