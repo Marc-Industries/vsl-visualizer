@@ -76,51 +76,67 @@ function upsertScene(projectId, sceneIndex, data) {
  *   - total_scenes?: number
  */
 app.post('/update-scene', (req, res) => {
-  const { type, project_id, scene_index, image_url, video_url, job_id, prompt, total_scenes } = req.body;
+  const {
+    type,
+    project_id, projectId,
+    scene_index, sceneIndex,
+    image_url, imageUrl,
+    video_url, videoUrl,
+    job_id, jobId,
+    prompt,
+    total_scenes, totalScenes
+  } = req.body;
 
-  if (!project_id) {
+  const pId = project_id || projectId;
+  const sIdx = scene_index !== undefined ? scene_index : sceneIndex;
+  const imgUrl = image_url || imageUrl;
+  const vidUrl = video_url || videoUrl;
+  const jId = job_id || jobId;
+  const tScenes = total_scenes || totalScenes;
+
+  if (!pId) {
     return res.status(400).json({ error: 'project_id è obbligatorio' });
   }
 
   // Se è un segnale di completamento globale
   if (type === 'project_completed') {
-    io.to(`project:${project_id}`).emit('project_completed', { projectId: project_id });
-    console.log(`[Bridge] PROJECT COMPLETED | project=${project_id}`);
+    io.to(`project:${pId}`).emit('project_completed', { projectId: pId });
+    console.log(`[Bridge] PROJECT COMPLETED | project=${pId}`);
     return res.json({ ok: true, status: 'completed' });
   }
 
-  if (scene_index === undefined) {
+  if (sIdx === undefined) {
     return res.status(400).json({ error: 'scene_index è obbligatorio per gli aggiornamenti di scena' });
   }
 
-  const project = getOrCreateProject(project_id, total_scenes || 0);
-  if (total_scenes) project.totalScenes = total_scenes;
+  const project = getOrCreateProject(pId, tScenes || 0);
+  if (tScenes) project.totalScenes = tScenes;
 
   let sceneUpdate = { prompt };
-  if (image_url) sceneUpdate.imageUrl = image_url;
-  if (video_url) sceneUpdate.videoUrl = video_url;
-  if (job_id) sceneUpdate.jobId = job_id;
+  if (imgUrl) sceneUpdate.imageUrl = imgUrl;
+  if (vidUrl) sceneUpdate.videoUrl = vidUrl;
+  if (jId) sceneUpdate.jobId = jId;
 
-  if (type === 'master_image_ready') {
-    sceneUpdate = { ...sceneUpdate, status: 'image_ready', isMaster: scene_index === 0 };
-  } else if (type === 'video_job_started') {
+  if (type === 'master_image_ready' || type === 'image_ready') {
+    sceneUpdate = { ...sceneUpdate, status: 'image_ready', isMaster: sIdx === 0 };
+  } else if (type === 'video_job_started' || type === 'generating_video') {
     sceneUpdate = { ...sceneUpdate, status: 'generating_video' };
-  } else if (type === 'scene_prompt_ready') {
+  } else if (type === 'scene_prompt_ready' || type === 'processing') {
     sceneUpdate = { ...sceneUpdate, status: 'processing' };
-  } else if (type === 'video_ready' || video_url) {
+  } else if (type === 'video_ready' || vidUrl) {
     sceneUpdate = { ...sceneUpdate, status: 'completed' };
   }
 
-  const scene = upsertScene(project_id, scene_index, sceneUpdate);
+  const scene = upsertScene(pId, sIdx, sceneUpdate);
 
   // Emetti a tutti i client che "guardano" questo progetto
-  io.to(`project:${project_id}`).emit('scene_update', {
-    projectId: project_id,
+  io.to(`project:${pId}`).emit('scene_update', {
+    projectId: pId,
     scene,
     totalScenes: project.totalScenes,
   });
 
-  console.log(`[Bridge] ${type || 'update'} | project=${project_id} | scene=${scene_index} | video=${!!video_url}`);
+  console.log(`[Bridge] ${type || 'update'} | project=${pId} | scene=${sIdx} | video=${!!vidUrl}`);
   res.json({ ok: true, scene });
 });
 
