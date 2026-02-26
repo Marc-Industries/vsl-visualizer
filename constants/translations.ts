@@ -24,16 +24,16 @@ export const TRANSLATIONS = {
     agentWorking: "Generating prompts & images...",
     copyAll: "Copy Prompts",
     copySuccess: "All prompts copied to clipboard!",
-    modeSwitch: {
-      srt: "From Caption (.SRT)",
-      prompts: "Direct Prompts"
-    },
-    directPrompts: {
-      title: "Direct Image Prompts",
-      label: "Paste Prompts (One per line)",
-      placeholder: "A cinematic shot of a futuristic city...\nA close up of a gold coin...\nA happy family eating dinner...",
-      count: "prompts detected",
-      waiting: "Waiting for prompt list..."
+    avatar: {
+      sectionTitle: "Character & Product Setup",
+      avatarLabel: "Avatar / Character Photo",
+      avatarHelp: "Upload or paste a URL of the person/character that will appear in all scenes.",
+      productLabel: "Product Photo (Optional)",
+      productHelp: "Upload or paste a URL of the product being marketed.",
+      uploadBtn: "Upload Photo",
+      pasteUrl: "Or paste URL",
+      remove: "Remove",
+      required: "Avatar photo is required to run the pipeline."
     },
     timeline: {
       source: "Context / Source",
@@ -117,16 +117,16 @@ Your task is to take the provided script segment and generate a single Nano Bana
     agentWorking: "Generazione prompt e immagini...",
     copyAll: "Copia Prompt",
     copySuccess: "Tutti i prompt copiati negli appunti!",
-    modeSwitch: {
-      srt: "Da Sottotitoli (.SRT)",
-      prompts: "Da Prompt Diretti"
-    },
-    directPrompts: {
-      title: "Prompt Immagini Diretti",
-      label: "Incolla Prompt (Uno per riga)",
-      placeholder: "Una ripresa cinematografica di una città futuristica...\nUn primo piano di una moneta d'oro...\nUna famiglia felice che cena...",
-      count: "prompt rilevati",
-      waiting: "In attesa della lista prompt..."
+    avatar: {
+      sectionTitle: "Setup Personaggio & Prodotto",
+      avatarLabel: "Foto Avatar / Personaggio",
+      avatarHelp: "Carica o incolla un URL della persona/personaggio che apparirà in tutte le scene.",
+      productLabel: "Foto Prodotto (Opzionale)",
+      productHelp: "Carica o incolla un URL del prodotto da pubblicizzare.",
+      uploadBtn: "Carica Foto",
+      pasteUrl: "Oppure incolla URL",
+      remove: "Rimuovi",
+      required: "La foto dell'avatar è obbligatoria per avviare la pipeline."
     },
     timeline: {
       source: "Contesto / Sorgente",
