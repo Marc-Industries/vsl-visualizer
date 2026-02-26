@@ -1,30 +1,33 @@
 import React, { useState } from 'react';
 import { TimelineSegment } from '../types';
-import { Image as ImageIcon, Loader2, RefreshCw, Wand2, X, Film } from 'lucide-react';
+import { Image as ImageIcon, Loader2, RefreshCw, Wand2, X, Film, Download } from 'lucide-react';
 import { getProxiedImageUrl } from '@/utils/imageUtils';
 
 interface TimelineCardProps {
     segment: TimelineSegment;
     onRegeneratePrompt: (id: string) => void;
-    onRegenerateImage: (id: string, feedback?: string) => void;
+    onRegenerateVideo: (id: string) => void;
+    onDownloadVideo: (url: string) => void;
     labels: {
         source: string;
         generated: string;
         waiting: string;
         regenerate: string;
-        regenerateImage: string;
+        regenerateVideo: string;
+        downloadVideo: string;
         imageLabel: string;
-        feedbackPlaceholder: string;
-        applyFix: string;
-        cancel: string;
         videoLabel: string;
         generatingVideo: string;
     }
 }
 
-export const TimelineCard: React.FC<TimelineCardProps> = ({ segment, onRegeneratePrompt, onRegenerateImage, labels }) => {
-    const [showFeedback, setShowFeedback] = useState(false);
-    const [feedback, setFeedback] = useState('');
+export const TimelineCard: React.FC<TimelineCardProps> = ({
+    segment,
+    onRegeneratePrompt,
+    onRegenerateVideo,
+    onDownloadVideo,
+    labels
+}) => {
 
     const formatTime = (seconds: number) => {
         const mins = Math.floor(seconds / 60);
@@ -32,15 +35,6 @@ export const TimelineCard: React.FC<TimelineCardProps> = ({ segment, onRegenerat
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     };
 
-    const handleImageRegenClick = () => {
-        setShowFeedback(true);
-    };
-
-    const submitImageRegen = () => {
-        onRegenerateImage(segment.id, feedback);
-        setShowFeedback(false);
-        setFeedback('');
-    };
 
     return (
         <div className="flex gap-4 mb-8 relative">
@@ -121,13 +115,27 @@ export const TimelineCard: React.FC<TimelineCardProps> = ({ segment, onRegenerat
                                         alt="Generated Asset"
                                         className="w-full h-full object-cover rounded-md shadow-inner"
                                     />
-                                    {/* Hover Actions */}
-                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/image:opacity-100 transition-opacity flex items-center justify-center rounded-md">
+
+                                    {/* Hover Actions: Video Download & Regen */}
+                                    <div className="absolute inset-x-0 bottom-0 bg-black/60 opacity-0 group-hover/image:opacity-100 transition-opacity p-2 flex justify-around items-center backdrop-blur-sm rounded-b-md">
+                                        {segment.videoUrl ? (
+                                            <button
+                                                onClick={() => onDownloadVideo(segment.videoUrl!)}
+                                                className="p-1.5 bg-emerald-500/20 hover:bg-emerald-500 text-emerald-400 hover:text-white rounded-lg transition-all border border-emerald-500/30 flex items-center gap-1.5 text-[10px] font-bold"
+                                                title={labels.downloadVideo}
+                                            >
+                                                <Download size={14} /> {labels.downloadVideo}
+                                            </button>
+                                        ) : (
+                                            <div className="text-[9px] text-slate-500 italic">No video yet</div>
+                                        )}
+
                                         <button
-                                            onClick={handleImageRegenClick}
-                                            className="bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 text-white px-3 py-2 rounded-full flex items-center gap-2 text-xs font-semibold transform hover:scale-105 transition-all"
+                                            onClick={() => onRegenerateVideo(segment.id)}
+                                            className="p-1.5 bg-indigo-500/20 hover:bg-indigo-500 text-indigo-400 hover:text-white rounded-lg transition-all border border-indigo-500/30 flex items-center gap-1.5 text-[10px] font-bold"
+                                            title={labels.regenerateVideo}
                                         >
-                                            <Wand2 size={14} /> {labels.regenerateImage}
+                                            <RefreshCw size={14} className={segment.isProcessingVideo ? 'animate-spin' : ''} /> {labels.regenerateVideo}
                                         </button>
                                     </div>
                                 </div>
@@ -139,36 +147,6 @@ export const TimelineCard: React.FC<TimelineCardProps> = ({ segment, onRegenerat
                         </div>
                     </div>
 
-                    {/* Feedback Modal (Popover) */}
-                    {showFeedback && (
-                        <div className="absolute inset-x-0 bottom-0 z-20 bg-slate-800 border-t border-slate-600 p-4 animate-in slide-in-from-bottom-2 shadow-2xl rounded-b-xl">
-                            <div className="flex justify-between items-center mb-2">
-                                <label className="text-xs font-bold text-accent uppercase">{labels.regenerateImage}</label>
-                                <button onClick={() => setShowFeedback(false)} className="text-slate-400 hover:text-white"><X size={14} /></button>
-                            </div>
-                            <textarea
-                                className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-sm text-white focus:border-accent outline-none mb-3 h-20 resize-none"
-                                placeholder={labels.feedbackPlaceholder}
-                                value={feedback}
-                                onChange={(e) => setFeedback(e.target.value)}
-                                autoFocus
-                            />
-                            <div className="flex justify-end gap-2">
-                                <button
-                                    onClick={() => setShowFeedback(false)}
-                                    className="px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-700 rounded"
-                                >
-                                    {labels.cancel}
-                                </button>
-                                <button
-                                    onClick={submitImageRegen}
-                                    className="px-3 py-1.5 text-xs bg-accent hover:bg-pink-600 text-white font-bold rounded flex items-center gap-1"
-                                >
-                                    <Wand2 size={12} /> {labels.applyFix}
-                                </button>
-                            </div>
-                        </div>
-                    )}
                 </div>
 
                 {/* Video Transition Section (Outside main card to look like a connector) */}
