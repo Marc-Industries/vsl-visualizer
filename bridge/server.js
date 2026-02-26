@@ -230,13 +230,51 @@ app.get('/proxy/kie-status/:jobId', async (req, res) => {
     });
     const data = await response.json();
 
-    // Normalizza la risposta Kie.ai al formato che il frontend si aspetta
-    const status = data.data?.status || data.status || 'PENDING';
-    const videoUrl = data.data?.videoUrl || data.video_url || null;
+    // Kie.ai response structure handling (from logs):
+    // data.data.response.resultUrls[0] contains the mp4 link
+    // data.data.successFlag === 1 indicates completion
+
+    const kData = data.data || data;
+    const resultUrls = kData.response?.resultUrls || kData.resultUrls || [];
+    const videoUrl = resultUrls[0] || kData.videoUrl || kData.video_url || null;
+
+    let status = kData.status?.toUpperCase() || 'PENDING';
+    if (kData.successFlag === 1) status = 'COMPLETED';
+    if (videoUrl && status === 'PENDING') status = 'COMPLETED';
 
     res.json({ status, video_url: videoUrl, raw: data });
   } catch (err) {
     res.status(502).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────
+// PROXY Immagini Drive — bypassa il 403 Forbidden (Hotlinking)
+// ─────────────────────────────────────────────
+app.get('/proxy/image-drive', async (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).json({ error: 'URL mancante' });
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Drive ha risposto con status ${response.status}`);
+    }
+
+    const contentType = response.headers.get('content-type');
+    if (contentType) res.setHeader('Content-Type', contentType);
+
+    // Pipe del body della risposta
+    const arrayBuffer = await response.arrayBuffer();
+    res.send(Buffer.from(arrayBuffer));
+  } catch (err) {
+    console.error('[Bridge] Errore proxy immagine:', err.message);
+    res.status(502).json({ error: 'Errore nel recupero dell\'immagine da Drive' });
   }
 });
 
