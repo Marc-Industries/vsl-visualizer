@@ -21,14 +21,17 @@ export interface TimelineSegment {
   isProcessingPrompt: boolean;
   isProcessingImage: boolean;
   isProcessingVideo: boolean;
+  jobId?: string;
   error?: string;
 }
 
 export interface AgentConfig {
   intervalSeconds: number;
   systemInstruction: string;
-  kieApiKey?: string; // Added for Kie.ai integration
-  webhookUrl?: string; // Webhook URL for sending data
+  kieApiKey?: string;
+  webhookUrl?: string;
+  avatarUrl?: string;   // Base64 data URI or external URL
+  productUrl?: string;  // Base64 data URI or external URL
 }
 
 export enum FlowStatus {
