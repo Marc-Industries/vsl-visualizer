@@ -48,7 +48,7 @@ export const generateStyleBible = async (
 };
 
 export const generatePromptForSegment = async (
-  segment: TimelineSegment, 
+  segment: TimelineSegment,
   systemInstruction: string,
   styleBible: string,
   previousVisualContext: string
@@ -115,11 +115,11 @@ export const generateImageFromPrompt = async (prompt: string): Promise<string | 
     // Extract image from response parts
     const candidates = response.candidates;
     if (candidates && candidates[0] && candidates[0].content && candidates[0].content.parts) {
-        for (const part of candidates[0].content.parts) {
-            if (part.inlineData && part.inlineData.data) {
-                return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-            }
+      for (const part of candidates[0].content.parts) {
+        if (part.inlineData && part.inlineData.data) {
+          return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
         }
+      }
     }
     return undefined;
   } catch (error) {
@@ -129,17 +129,17 @@ export const generateImageFromPrompt = async (prompt: string): Promise<string | 
 };
 
 export const editImageWithFeedback = async (
-  base64Image: string, 
+  base64Image: string,
   originalPrompt: string,
   feedback: string
 ): Promise<string | undefined> => {
   try {
     const ai = getClient();
     const model = 'gemini-2.5-flash-image';
-    
+
     // Clean base64 string if it has prefix
     const data = base64Image.replace(/^data:image\/\w+;base64,/, "");
-    
+
     const response = await ai.models.generateContent({
       model: model,
       contents: {
@@ -159,70 +159,15 @@ export const editImageWithFeedback = async (
 
     const candidates = response.candidates;
     if (candidates && candidates[0] && candidates[0].content && candidates[0].content.parts) {
-        for (const part of candidates[0].content.parts) {
-            if (part.inlineData && part.inlineData.data) {
-                return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-            }
+      for (const part of candidates[0].content.parts) {
+        if (part.inlineData && part.inlineData.data) {
+          return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
         }
+      }
     }
     return undefined;
   } catch (error) {
     console.error("Gemini Image Edit Error:", error);
-    throw error;
-  }
-};
-
-export const generateVideoTransition = async (
-  startImageBase64: string, 
-  endImageBase64: string,
-  promptContext: string
-): Promise<string | undefined> => {
-  try {
-    // Note: Creating a new client instance is recommended for Veo operations to ensure fresh key usage if selecting keys.
-    const ai = getClient();
-    const model = 'veo-3.1-fast-generate-preview'; // Using fast preview for speed
-
-    // Clean base64 strings
-    const startData = startImageBase64.replace(/^data:image\/\w+;base64,/, "");
-    const endData = endImageBase64.replace(/^data:image\/\w+;base64,/, "");
-
-    console.log("Starting video generation...");
-    
-    let operation = await ai.models.generateVideos({
-      model: model,
-      prompt: `Cinematic transition. ${promptContext}`, // Prompt is optional but helps context
-      image: {
-        imageBytes: startData,
-        mimeType: 'image/png',
-      },
-      config: {
-        numberOfVideos: 1,
-        resolution: '720p',
-        aspectRatio: '9:16', // Changed to 9:16 to match VSL vertical format request
-        lastFrame: {
-            imageBytes: endData,
-            mimeType: 'image/png'
-        }
-      }
-    });
-
-    // Poll for completion
-    while (!operation.done) {
-      await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5s
-      operation = await ai.operations.getVideosOperation({operation: operation});
-      console.log("Video polling...", operation.metadata);
-    }
-
-    const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
-    if (!downloadLink) return undefined;
-
-    // Fetch the actual bytes using the key
-    const response = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
-    const blob = await response.blob();
-    return URL.createObjectURL(blob);
-
-  } catch (error) {
-    console.error("Gemini Video Generation Error:", error);
     throw error;
   }
 };
