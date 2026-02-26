@@ -410,21 +410,13 @@ function App() {
 
         let newPrompt = "";
 
-        if (inputMode === 'SRT') {
-            // For regeneration, we might not have the original styleBible handy in scope easily without storing it.
-            // For now, we will use a generic directive or try to grab context from neighbors.
-            // Ideally, we should store styleBible in state. For this quick fix, we'll infer context.
-            const prevPrompt = segments[segmentIndex - 1]?.generatedPrompt || "";
-            newPrompt = await generatePromptForSegment(
-                segment,
-                config.systemInstruction,
-                "Maintain consistency with previous shots.", // Fallback style if full bible not available
-                prevPrompt
-            );
-        } else {
-            newPrompt = segment.generatedPrompt || "";
-            await new Promise(r => setTimeout(r, 500));
-        }
+        const prevPrompt = segments[segmentIndex - 1]?.generatedPrompt || "";
+        newPrompt = await generatePromptForSegment(
+            segment,
+            config.systemInstruction,
+            "Maintain consistency with previous shots.",
+            prevPrompt
+        );
 
         setSegments(prev => prev.map(s => s.id === id ? { ...s, isProcessingPrompt: false, generatedPrompt: newPrompt, isProcessingImage: true } : s));
 
@@ -482,7 +474,7 @@ function App() {
         alert(t.copySuccess);
     };
 
-    const isReady = inputMode === 'SRT' ? srtInput.trim().length > 0 : promptInput.trim().length > 0;
+    const isReady = srtInput.trim().length > 0;
     const allImagesReady = segments.length > 0 && segments.every(s => s.imageUrl && !s.isProcessingImage);
 
     // --- Render Views ---
@@ -745,7 +737,7 @@ function App() {
                                 <TimelineCard
                                     key={segment.id}
                                     segment={segment}
-                                    onRegeneratePrompt={inputMode === 'SRT' ? handleRegeneratePrompt : () => { }}
+                                    onRegeneratePrompt={handleRegeneratePrompt}
                                     onRegenerateVideo={handleRegenerateVideo}
                                     onDownloadVideo={handleDownloadVideo}
                                     labels={t.timeline}
@@ -943,7 +935,8 @@ function App() {
                                                 key={segment.id}
                                                 segment={segment}
                                                 onRegeneratePrompt={() => { }}
-                                                onRegenerateImage={() => { }}
+                                                onRegenerateVideo={() => { }}
+                                                onDownloadVideo={() => { }}
                                                 labels={t.timeline}
                                             />
                                         ))}
