@@ -26,10 +26,8 @@ import {
     generatePromptForSegment,
     generateImageFromPrompt,
     editImageWithFeedback,
-    generateVideoTransition,
     generateStyleBible
 } from './services/geminiService';
-import { generateKieTransition } from './services/kieService';
 import {
     sendToWebhook,
     buildSRTPayload,
@@ -61,7 +59,6 @@ function App() {
     const [promptInput, setPromptInput] = useState<string>('');
 
     const [status, setStatus] = useState<FlowStatus>(FlowStatus.IDLE);
-    const [videoStatus, setVideoStatus] = useState<FlowStatus>(FlowStatus.IDLE);
     const [segments, setSegments] = useState<TimelineSegment[]>([]);
 
     const [config, setConfig] = useState<AgentConfig>({
@@ -80,6 +77,12 @@ function App() {
         return newId;
     });
     const socketRef = useRef<Socket | null>(null);
+    const segmentsRef = useRef<TimelineSegment[]>(segments);
+
+    // Sincronizziamo il ref ogni volta che cambiano i segmenti
+    useEffect(() => {
+        segmentsRef.current = segments;
+    }, [segments]);
 
     const t = TRANSLATIONS[lang];
     const resultsRef = useRef<HTMLDivElement>(null);
@@ -179,7 +182,7 @@ function App() {
                 return prev;
             });
 
-            const pending = segments.filter(s => s.jobId && !s.videoUrl);
+            const pending = segmentsRef.current.filter(s => s.jobId && !s.videoUrl);
             if (pending.length === 0) return;
 
             for (const seg of pending) {
@@ -454,63 +457,6 @@ function App() {
         }
     };
 
-    const runVideoGeneration = async () => {
-        // Check if using Google Veo (default) or Kie.ai
-        const useKie = config.kieApiKey && config.kieApiKey.length > 5;
-
-        if (!useKie && (window as any).aistudio) {
-            const hasKey = await (window as any).aistudio.hasSelectedApiKey();
-            if (!hasKey) {
-                await (window as any).aistudio.openSelectKey();
-            }
-        }
-
-        setVideoStatus(FlowStatus.PROCESSING);
-
-        for (let i = 0; i < segments.length - 1; i++) {
-            const startSeg = segments[i];
-            const endSeg = segments[i + 1];
-
-            if (!startSeg.imageUrl || !endSeg.imageUrl) continue;
-            if (startSeg.videoUrl) continue;
-
-            setSegments(prev => prev.map(s => s.id === startSeg.id ? { ...s, isProcessingVideo: true } : s));
-
-            try {
-                let videoUrl: string | undefined;
-
-                if (useKie) {
-                    videoUrl = await generateKieTransition(
-                        startSeg.imageUrl,
-                        endSeg.imageUrl,
-                        startSeg.generatedPrompt || "cinematic transition",
-                        config.kieApiKey || ""
-                    );
-                } else {
-                    // Fallback to Google Veo (which might cause 403 if not allowlisted)
-                    videoUrl = await generateVideoTransition(
-                        startSeg.imageUrl,
-                        endSeg.imageUrl,
-                        startSeg.generatedPrompt || "cinematic"
-                    );
-                }
-
-                setSegments(prev => prev.map(s =>
-                    s.id === startSeg.id
-                        ? { ...s, isProcessingVideo: false, videoUrl: videoUrl }
-                        : s
-                ));
-            } catch (error) {
-                console.error("Video Gen Error", error);
-                setSegments(prev => prev.map(s =>
-                    s.id === startSeg.id
-                        ? { ...s, isProcessingVideo: false, error: useKie ? "Kie Failed" : "Veo 403/Error" }
-                        : s
-                ));
-            }
-        }
-        setVideoStatus(FlowStatus.COMPLETED);
-    };
 
     const copyAllPrompts = () => {
         const allText = segments.map(s => `[${s.startTime}s]: ${s.generatedPrompt}`).join('\n\n');
@@ -725,35 +671,6 @@ function App() {
                             ))}
                         </div>
 
-                        <div className="mt-8 pt-8 border-t border-slate-700 text-center">
-                            <p className="text-sm text-slate-400 mb-4">{t.videoGen.description}</p>
-                            <button
-                                onClick={runVideoGeneration}
-                                disabled={!allImagesReady || videoStatus === FlowStatus.PROCESSING}
-                                className={`
-                                flex items-center justify-center gap-3 px-8 py-3 mx-auto rounded-lg font-bold text-white shadow-xl transition-all
-                                ${!allImagesReady || videoStatus === FlowStatus.PROCESSING
-                                        ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
-                                        : 'bg-gradient-to-r from-accent to-pink-600 hover:shadow-accent/30'
-                                    }
-                            `}
-                            >
-                                {videoStatus === FlowStatus.PROCESSING ? (
-                                    <>
-                                        <Loader2 className="animate-spin" size={20} />
-                                        {t.videoGen.processing}
-                                    </>
-                                ) : (
-                                    <>
-                                        <Clapperboard size={20} />
-                                        {t.videoGen.generateButton}
-                                    </>
-                                )}
-                            </button>
-                            {!allImagesReady && (
-                                <p className="text-xs text-red-400 mt-2">{t.videoGen.missingImages}</p>
-                            )}
-                        </div>
 
                     </Node>
                 </div>
@@ -767,59 +684,6 @@ function App() {
                 <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
                     <Settings className="text-slate-400" /> {t.settings.title}
                 </h2>
-
-                {/* Video Provider */}
-                <div className="mb-8 border-b border-slate-800 pb-8">
-                    <h3 className="text-lg font-semibold text-slate-200 mb-2">{t.settings.videoProvider}</h3>
-                    <p className="text-sm text-slate-500 mb-4">{t.settings.providerDesc}</p>
-
-                    <div className="space-y-3">
-                        <label className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${!config.kieApiKey ? 'border-primary bg-slate-800' : 'border-slate-700 hover:bg-slate-800'}`}>
-                            <input
-                                type="radio"
-                                name="provider"
-                                checked={!config.kieApiKey}
-                                onChange={() => handleConfigChange('kieApiKey', '')}
-                                className="text-primary focus:ring-primary"
-                            />
-                            <div>
-                                <span className="block font-bold text-white">Google Veo (Default)</span>
-                                <span className="text-xs text-slate-400">Standard video generation (May cause 403 if not allowlisted).</span>
-                            </div>
-                        </label>
-
-                        <label className={`flex flex-col gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${config.kieApiKey ? 'border-accent bg-slate-800' : 'border-slate-700 hover:bg-slate-800'}`}>
-                            <div className="flex items-center gap-3">
-                                <input
-                                    type="radio"
-                                    name="provider"
-                                    checked={!!config.kieApiKey}
-                                    onChange={() => { }} // Controlled by text input below
-                                    className="text-accent focus:ring-accent"
-                                />
-                                <div>
-                                    <span className="block font-bold text-white">Kling AI (via Kie.ai)</span>
-                                    <span className="text-xs text-slate-400">External provider. Requires API Token.</span>
-                                </div>
-                            </div>
-
-                            {/* Kie Token Input */}
-                            <div className="pl-6 mt-2">
-                                <label className="block text-xs font-semibold text-slate-400 mb-1">{t.settings.kieTokenLabel}</label>
-                                <div className="relative">
-                                    <Key size={14} className="absolute left-3 top-3 text-slate-500" />
-                                    <input
-                                        type="password"
-                                        className="w-full bg-slate-950 border border-slate-700 rounded px-10 py-2 text-sm focus:border-accent outline-none"
-                                        placeholder={t.settings.kieTokenPlaceholder}
-                                        value={config.kieApiKey || ''}
-                                        onChange={(e) => handleConfigChange('kieApiKey', e.target.value)}
-                                    />
-                                </div>
-                            </div>
-                        </label>
-                    </div>
-                </div>
 
                 {/* Webhook Configuration */}
                 <div className="mb-8 border-b border-slate-800 pb-8">
