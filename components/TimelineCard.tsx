@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { TimelineSegment } from '../types';
 import { Image as ImageIcon, Loader2, RefreshCw, Wand2, X, Film } from 'lucide-react';
-import { getProxiedImageUrl } from '../utils/imageUtils';
+import { getProxiedImageUrl } from '@/utils/imageUtils';
 
 interface TimelineCardProps {
     segment: TimelineSegment;
