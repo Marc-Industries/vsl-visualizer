@@ -76,7 +76,7 @@ function upsertScene(projectId, sceneIndex, data) {
  *   - total_scenes?: number
  */
 app.post('/update-scene', (req, res) => {
-  const { type, project_id, scene_index, image_url, job_id, prompt, total_scenes } = req.body;
+  const { type, project_id, scene_index, image_url, video_url, job_id, prompt, total_scenes } = req.body;
 
   if (!project_id) {
     return res.status(400).json({ error: 'project_id è obbligatorio' });
@@ -97,13 +97,18 @@ app.post('/update-scene', (req, res) => {
   if (total_scenes) project.totalScenes = total_scenes;
 
   let sceneUpdate = { prompt };
+  if (image_url) sceneUpdate.imageUrl = image_url;
+  if (video_url) sceneUpdate.videoUrl = video_url;
+  if (job_id) sceneUpdate.jobId = job_id;
 
   if (type === 'master_image_ready') {
-    sceneUpdate = { ...sceneUpdate, status: 'image_ready', imageUrl: image_url, isMaster: scene_index === 0 };
+    sceneUpdate = { ...sceneUpdate, status: 'image_ready', isMaster: scene_index === 0 };
   } else if (type === 'video_job_started') {
-    sceneUpdate = { ...sceneUpdate, status: 'generating_video', jobId: job_id };
+    sceneUpdate = { ...sceneUpdate, status: 'generating_video' };
   } else if (type === 'scene_prompt_ready') {
     sceneUpdate = { ...sceneUpdate, status: 'processing' };
+  } else if (type === 'video_ready' || video_url) {
+    sceneUpdate = { ...sceneUpdate, status: 'completed' };
   }
 
   const scene = upsertScene(project_id, scene_index, sceneUpdate);
@@ -115,7 +120,7 @@ app.post('/update-scene', (req, res) => {
     totalScenes: project.totalScenes,
   });
 
-  console.log(`[Bridge] ${type} | project=${project_id} | scene=${scene_index}`);
+  console.log(`[Bridge] ${type || 'update'} | project=${project_id} | scene=${scene_index} | video=${!!video_url}`);
   res.json({ ok: true, scene });
 });
 
