@@ -41,12 +41,15 @@ export const TRANSLATIONS = {
       waiting: "Generating...",
       regenerate: "Regenerate Prompt",
       regenerateImage: "Regenerate Image",
+      regenerateVideo: "Regenerate Video",
+      downloadVideo: "Download Video",
       imageLabel: "Generated Output",
       feedbackPlaceholder: "Describe what to fix (e.g. 'Make it brighter', 'Remove the cat')...",
       applyFix: "Apply Fix",
       cancel: "Cancel",
       videoLabel: "Transition Video (Next Segment)",
-      generatingVideo: "Generating transition..."
+      generatingVideo: "Generating transition...",
+      downloadClip: "Download Clip"
     },
     videoGen: {
       generateButton: "Generate Video Flow",
@@ -58,7 +61,9 @@ export const TRANSLATIONS = {
       workflow: "Workflow",
       editor: "Video Editor",
       bridge: "Bridge Results",
-      settings: "Settings"
+      settings: "Settings",
+      cleanCache: "Clean Session",
+      cleanCacheConfirm: "Are you sure you want to clean the session? This will reset all segments and generate a new project ID.",
     },
     editor: {
       title: "Timeline Editor",
@@ -129,12 +134,15 @@ Your task is to take the provided script segment and generate a single Nano Bana
       waiting: "Generazione in corso...",
       regenerate: "Rigenera Prompt",
       regenerateImage: "Rigenera Immagine",
+      regenerateVideo: "Rigenera Video",
+      downloadVideo: "Scarica Video",
       imageLabel: "Output Generato",
       feedbackPlaceholder: "Descrivi cosa correggere (es. 'Rendilo più luminoso', 'Rimuovi il gatto')...",
       applyFix: "Applica Correzione",
       cancel: "Annulla",
       videoLabel: "Video Transizione (Verso Succ.)",
-      generatingVideo: "Generazione transizione..."
+      generatingVideo: "Generazione transizione...",
+      downloadClip: "Scarica Clip"
     },
     videoGen: {
       generateButton: "Genera Flusso Video",
@@ -146,7 +154,9 @@ Your task is to take the provided script segment and generate a single Nano Bana
       workflow: "Workflow",
       editor: "Editor Video",
       bridge: "Risultati Bridge",
-      settings: "Impostazioni"
+      settings: "Impostazioni",
+      cleanCache: "Pulisci Sessione",
+      cleanCacheConfirm: "Sei sicuro di voler pulire la sessione? Questo resetterà tutti i segmenti e genererà un nuovo ID progetto.",
     },
     editor: {
       title: "Timeline Editor (Stile CapCut)",
