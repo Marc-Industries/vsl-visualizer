@@ -50,7 +50,9 @@ import {
     AgentConfig,
     FlowStatus,
     Language,
-    ActiveTab
+    ActiveTab,
+    PipelineMode,
+    InputMode
 } from './types';
 
 const BRIDGE_URL = import.meta.env.VITE_BRIDGE_URL || 'http://localhost:3001';
@@ -58,11 +60,14 @@ const BRIDGE_URL = import.meta.env.VITE_BRIDGE_URL || 'http://localhost:3001';
 function App() {
     // State
     const [lang, setLang] = useState<Language>('it');
+    const [pipelineMode, setPipelineMode] = useState<PipelineMode>('AVATAR');
+    const [inputMode, setInputMode] = useState<InputMode>('SRT');
     const [activeTab, setActiveTab] = useState<ActiveTab>('workflow');
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
     // Input States
     const [srtInput, setSrtInput] = useState<string>('');
+    const [promptInput, setPromptInput] = useState<string>('');
     const [avatarPreview, setAvatarPreview] = useState<string>('');
     const [productPreview, setProductPreview] = useState<string>('');
     const [avatarUrlInput, setAvatarUrlInput] = useState<string>('');
@@ -245,35 +250,67 @@ function App() {
     // --- Workflow Logic ---
 
     const runWorkflow = useCallback(async () => {
-        // Validate avatar
-        const finalAvatarUrl = avatarPreview || avatarUrlInput;
-        if (!finalAvatarUrl) {
-            alert(t.avatar.required);
-            return;
+        let finalAvatarUrl = '';
+        let finalProductUrl = '';
+
+        if (pipelineMode === 'AVATAR') {
+            finalAvatarUrl = avatarPreview || avatarUrlInput;
+            if (!finalAvatarUrl) {
+                alert(t.avatar.required);
+                return;
+            }
+            finalProductUrl = productPreview || productUrlInput;
         }
-        const finalProductUrl = productPreview || productUrlInput;
 
         setStatus(FlowStatus.PROCESSING);
         setSegments([]);
 
-        if (!srtInput.trim()) return;
-        const rawEntries = parseSRT(srtInput);
-        if (rawEntries.length === 0) {
-            alert("No valid SRT entries found. Please check format.");
-            setStatus(FlowStatus.ERROR);
-            return;
+        let newSegments: TimelineSegment[] = [];
+
+        if (pipelineMode === 'AVATAR' || (pipelineMode === 'STANDARD' && inputMode === 'SRT')) {
+            if (!srtInput.trim()) {
+                setStatus(FlowStatus.IDLE);
+                return;
+            }
+            const rawEntries = parseSRT(srtInput);
+            if (rawEntries.length === 0) {
+                alert("No valid SRT entries found. Please check format.");
+                setStatus(FlowStatus.ERROR);
+                return;
+            }
+            const chunks = chunkSrtEntries(rawEntries, config.intervalSeconds);
+            newSegments = chunks.map(chunk => ({
+                id: generateUUID(),
+                startTime: chunk.startTime,
+                endTime: chunk.endTime,
+                originalText: chunk.text,
+                isProcessingPrompt: true,
+                isProcessingImage: false,
+                isProcessingVideo: false,
+                generatedPrompt: ''
+            }));
+        } else if (pipelineMode === 'STANDARD' && inputMode === 'PROMPTS') {
+            if (!promptInput.trim()) {
+                setStatus(FlowStatus.IDLE);
+                return;
+            }
+            const rawPrompts = promptInput.split('\n').filter(p => p.trim() !== '');
+            if (rawPrompts.length === 0) {
+                alert("No valid prompts found.");
+                setStatus(FlowStatus.ERROR);
+                return;
+            }
+            newSegments = rawPrompts.map((prompt, index) => ({
+                id: generateUUID(),
+                startTime: index * config.intervalSeconds,
+                endTime: (index + 1) * config.intervalSeconds,
+                originalText: `Prompt #${index + 1}`,
+                isProcessingPrompt: false,
+                isProcessingImage: true,
+                isProcessingVideo: false,
+                generatedPrompt: prompt.trim()
+            }));
         }
-        const chunks = chunkSrtEntries(rawEntries, config.intervalSeconds);
-        const newSegments: TimelineSegment[] = chunks.map(chunk => ({
-            id: generateUUID(),
-            startTime: chunk.startTime,
-            endTime: chunk.endTime,
-            originalText: chunk.text,
-            isProcessingPrompt: true,
-            isProcessingImage: false,
-            isProcessingVideo: false,
-            generatedPrompt: ''
-        }));
 
         setSegments(newSegments);
         setTimeout(() => {
@@ -287,29 +324,33 @@ function App() {
                     ? `${BRIDGE_URL}/update-scene`
                     : undefined;
 
+                // Prepare payload based on pipeline mode
+                let payloadBody: any = {
+                    project_id: projectId,
+                    type: pipelineMode === 'AVATAR' ? 'SRT' : inputMode,
+                    content: pipelineMode === 'AVATAR' ? srtInput : (inputMode === 'SRT' ? srtInput : promptInput.split('\n').filter(p => p.trim() !== '')),
+                    sampling_sec: config.intervalSeconds,
+                    user_agent_prompt: config.systemInstruction,
+                    required_frames: newSegments.length,
+                    ...(callbackUrl ? { callback_url: callbackUrl } : {}),
+                };
+
+                if (pipelineMode === 'AVATAR') {
+                    payloadBody.avatar_url = finalAvatarUrl;
+                    if (finalProductUrl) payloadBody.product_url = finalProductUrl;
+                }
+
                 const res = await fetch(config.webhookUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        body: {
-                            project_id: projectId,
-                            type: 'SRT',
-                            content: srtInput,
-                            avatar_url: finalAvatarUrl,
-                            product_url: finalProductUrl || undefined,
-                            sampling_sec: config.intervalSeconds,
-                            user_agent_prompt: config.systemInstruction,
-                            required_frames: newSegments.length,
-                            ...(callbackUrl ? { callback_url: callbackUrl } : {}),
-                        }
-                    }),
+                    body: JSON.stringify({ body: payloadBody }),
                 });
 
                 if (!res.ok) {
                     throw new Error(`n8n ha risposto con status ${res.status}`);
                 }
 
-                console.log('[Workflow] Richiesta inviata a n8n con successo (con avatar).');
+                console.log(`[Workflow] Richiesta inviata a n8n con successo (Mode: ${pipelineMode}).`);
 
                 if (isBridgeConnected) return;
 
@@ -380,7 +421,7 @@ function App() {
         }
 
         setStatus(FlowStatus.COMPLETED);
-    }, [srtInput, avatarPreview, avatarUrlInput, productPreview, productUrlInput, config, isBridgeConnected, projectId]);
+    }, [pipelineMode, inputMode, srtInput, promptInput, avatarPreview, avatarUrlInput, productPreview, productUrlInput, config, isBridgeConnected, projectId, t.avatar.required]);
 
 
 
@@ -490,8 +531,24 @@ function App() {
 
                 {/* Bridge Status Badge */}
                 <div className="flex justify-center mb-6">
-                    <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold border ${isBridgeConnected
-                        ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
+                    {/* Pipeline Mode Switcher */}
+                    <div className="flex bg-slate-900 border border-slate-700/50 rounded-lg p-1 mr-4">
+                        <button
+                            onClick={() => setPipelineMode('AVATAR')}
+                            className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${pipelineMode === 'AVATAR' ? 'bg-indigo-600 shadow-md text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+                        >
+                            {t.pipelineMode.avatar}
+                        </button>
+                        <button
+                            onClick={() => setPipelineMode('STANDARD')}
+                            className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${pipelineMode === 'STANDARD' ? 'bg-slate-700 shadow-md text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+                        >
+                            {t.pipelineMode.standard}
+                        </button>
+                    </div>
+
+                    <div className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 border shadow-sm ${isBridgeConnected
+                        ? 'bg-emerald-950/40 border-emerald-700/40 text-emerald-400'
                         : 'bg-amber-950/40 border-amber-700/40 text-amber-400'
                         }`}>
                         {isBridgeConnected
@@ -503,143 +560,193 @@ function App() {
 
             </header>
 
-            {/* Avatar & Product Setup */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                {/* Avatar Upload Card */}
-                <div className="bg-slate-900/80 border border-slate-700 rounded-xl p-6 backdrop-blur">
-                    <h3 className="text-sm font-bold text-white mb-1 flex items-center gap-2">
-                        <User size={16} className="text-blue-400" />
-                        {t.avatar.avatarLabel}
-                    </h3>
-                    <p className="text-xs text-slate-500 mb-4">{t.avatar.avatarHelp}</p>
+            {pipelineMode === 'AVATAR' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                    {/* Avatar Upload Card */}
+                    <div className="bg-slate-900/80 border border-slate-700 rounded-xl p-6 backdrop-blur">
+                        <h3 className="text-sm font-bold text-white mb-1 flex items-center gap-2">
+                            <User size={16} className="text-blue-400" />
+                            {t.avatar.avatarLabel}
+                        </h3>
+                        <p className="text-xs text-slate-500 mb-4">{t.avatar.avatarHelp}</p>
 
-                    {avatarPreview ? (
-                        <div className="relative group">
-                            <img src={avatarPreview} alt="Avatar" className="w-full h-48 object-cover rounded-lg border border-slate-600" />
-                            <button
-                                onClick={() => { setAvatarPreview(''); setAvatarUrlInput(''); }}
-                                className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg hover:bg-red-600"
-                            >
-                                <X size={12} />
-                            </button>
-                        </div>
-                    ) : (
-                        <div className="space-y-3">
-                            <input type="file" ref={avatarFileRef} accept="image/*" className="hidden" onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                if (file) {
-                                    const reader = new FileReader();
-                                    reader.onloadend = () => setAvatarPreview(reader.result as string);
-                                    reader.readAsDataURL(file);
-                                }
-                            }} />
-                            <button
-                                onClick={() => avatarFileRef.current?.click()}
-                                className="w-full h-32 border-2 border-dashed border-slate-600 rounded-xl flex flex-col items-center justify-center gap-2 text-slate-400 hover:border-blue-500 hover:text-blue-400 transition-all cursor-pointer bg-slate-950/50"
-                            >
-                                <Upload size={24} />
-                                <span className="text-xs font-bold">{t.avatar.uploadBtn}</span>
-                            </button>
-                            <div className="flex items-center gap-2">
-                                <span className="text-[10px] text-slate-600 uppercase font-bold">{t.avatar.pasteUrl}</span>
-                                <div className="flex-1 h-px bg-slate-700"></div>
+                        {avatarPreview ? (
+                            <div className="relative group">
+                                <img src={avatarPreview} alt="Avatar" className="w-full h-48 object-cover rounded-lg border border-slate-600" />
+                                <button
+                                    onClick={() => { setAvatarPreview(''); setAvatarUrlInput(''); }}
+                                    className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg hover:bg-red-600"
+                                >
+                                    <X size={12} />
+                                </button>
                             </div>
-                            <div className="flex gap-2">
-                                <input
-                                    type="text"
-                                    placeholder="https://..."
-                                    value={avatarUrlInput}
-                                    onChange={(e) => setAvatarUrlInput(e.target.value)}
-                                    className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono outline-none focus:border-blue-500 transition-colors"
-                                />
-                                {avatarUrlInput && (
-                                    <button onClick={() => setAvatarPreview(avatarUrlInput)} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded-lg text-xs font-bold transition-all">
-                                        <Link size={12} />
-                                    </button>
-                                )}
+                        ) : (
+                            <div className="space-y-3">
+                                <input type="file" ref={avatarFileRef} accept="image/*" className="hidden" onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) {
+                                        const reader = new FileReader();
+                                        reader.onloadend = () => setAvatarPreview(reader.result as string);
+                                        reader.readAsDataURL(file);
+                                    }
+                                }} />
+                                <button
+                                    onClick={() => avatarFileRef.current?.click()}
+                                    className="w-full h-32 border-2 border-dashed border-slate-600 rounded-xl flex flex-col items-center justify-center gap-2 text-slate-400 hover:border-blue-500 hover:text-blue-400 transition-all cursor-pointer bg-slate-950/50"
+                                >
+                                    <Upload size={24} />
+                                    <span className="text-xs font-bold">{t.avatar.uploadBtn}</span>
+                                </button>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-[10px] text-slate-600 uppercase font-bold">{t.avatar.pasteUrl}</span>
+                                    <div className="flex-1 h-px bg-slate-700"></div>
+                                </div>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        placeholder="https://..."
+                                        value={avatarUrlInput}
+                                        onChange={(e) => setAvatarUrlInput(e.target.value)}
+                                        className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono outline-none focus:border-blue-500 transition-colors"
+                                    />
+                                    {avatarUrlInput && (
+                                        <button onClick={() => setAvatarPreview(avatarUrlInput)} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded-lg text-xs font-bold transition-all">
+                                            <Link size={12} />
+                                        </button>
+                                    )}
+                                </div>
                             </div>
-                        </div>
-                    )}
+                        )}
+                    </div>
+
+                    {/* Product Upload Card */}
+                    <div className="bg-slate-900/80 border border-slate-700 rounded-xl p-6 backdrop-blur">
+                        <h3 className="text-sm font-bold text-white mb-1 flex items-center gap-2">
+                            <Package size={16} className="text-emerald-400" />
+                            {t.avatar.productLabel}
+                        </h3>
+                        <p className="text-xs text-slate-500 mb-4">{t.avatar.productHelp}</p>
+
+                        {productPreview ? (
+                            <div className="relative group">
+                                <img src={productPreview} alt="Product" className="w-full h-48 object-cover rounded-lg border border-slate-600" />
+                                <button
+                                    onClick={() => { setProductPreview(''); setProductUrlInput(''); }}
+                                    className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg hover:bg-red-600"
+                                >
+                                    <X size={12} />
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                <input type="file" ref={productFileRef} accept="image/*" className="hidden" onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) {
+                                        const reader = new FileReader();
+                                        reader.onloadend = () => setProductPreview(reader.result as string);
+                                        reader.readAsDataURL(file);
+                                    }
+                                }} />
+                                <button
+                                    onClick={() => productFileRef.current?.click()}
+                                    className="w-full h-32 border-2 border-dashed border-slate-600 rounded-xl flex flex-col items-center justify-center gap-2 text-slate-400 hover:border-emerald-500 hover:text-emerald-400 transition-all cursor-pointer bg-slate-950/50"
+                                >
+                                    <Upload size={24} />
+                                    <span className="text-xs font-bold">{t.avatar.uploadBtn}</span>
+                                </button>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-[10px] text-slate-600 uppercase font-bold">{t.avatar.pasteUrl}</span>
+                                    <div className="flex-1 h-px bg-slate-700"></div>
+                                </div>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        placeholder="https://..."
+                                        value={productUrlInput}
+                                        onChange={(e) => setProductUrlInput(e.target.value)}
+                                        className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono outline-none focus:border-emerald-500 transition-colors"
+                                    />
+                                    {productUrlInput && (
+                                        <button onClick={() => setProductPreview(productUrlInput)} className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded-lg text-xs font-bold transition-all">
+                                            <Link size={12} />
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
+            )}
 
-                {/* Product Upload Card */}
-                <div className="bg-slate-900/80 border border-slate-700 rounded-xl p-6 backdrop-blur">
-                    <h3 className="text-sm font-bold text-white mb-1 flex items-center gap-2">
-                        <Package size={16} className="text-emerald-400" />
-                        {t.avatar.productLabel}
-                    </h3>
-                    <p className="text-xs text-slate-500 mb-4">{t.avatar.productHelp}</p>
-
-                    {productPreview ? (
-                        <div className="relative group">
-                            <img src={productPreview} alt="Product" className="w-full h-48 object-cover rounded-lg border border-slate-600" />
-                            <button
-                                onClick={() => { setProductPreview(''); setProductUrlInput(''); }}
-                                className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg hover:bg-red-600"
-                            >
-                                <X size={12} />
-                            </button>
-                        </div>
-                    ) : (
-                        <div className="space-y-3">
-                            <input type="file" ref={productFileRef} accept="image/*" className="hidden" onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                if (file) {
-                                    const reader = new FileReader();
-                                    reader.onloadend = () => setProductPreview(reader.result as string);
-                                    reader.readAsDataURL(file);
-                                }
-                            }} />
-                            <button
-                                onClick={() => productFileRef.current?.click()}
-                                className="w-full h-32 border-2 border-dashed border-slate-600 rounded-xl flex flex-col items-center justify-center gap-2 text-slate-400 hover:border-emerald-500 hover:text-emerald-400 transition-all cursor-pointer bg-slate-950/50"
-                            >
-                                <Upload size={24} />
-                                <span className="text-xs font-bold">{t.avatar.uploadBtn}</span>
-                            </button>
-                            <div className="flex items-center gap-2">
-                                <span className="text-[10px] text-slate-600 uppercase font-bold">{t.avatar.pasteUrl}</span>
-                                <div className="flex-1 h-px bg-slate-700"></div>
-                            </div>
-                            <div className="flex gap-2">
-                                <input
-                                    type="text"
-                                    placeholder="https://..."
-                                    value={productUrlInput}
-                                    onChange={(e) => setProductUrlInput(e.target.value)}
-                                    className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono outline-none focus:border-emerald-500 transition-colors"
-                                />
-                                {productUrlInput && (
-                                    <button onClick={() => setProductPreview(productUrlInput)} className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded-lg text-xs font-bold transition-all">
-                                        <Link size={12} />
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-                    )}
+            {pipelineMode === 'STANDARD' && (
+                <div className="flex bg-slate-900 border border-slate-700/50 rounded-lg p-1 w-fit mb-6">
+                    <button
+                        onClick={() => setInputMode('SRT')}
+                        className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${inputMode === 'SRT' ? 'bg-blue-600 shadow-md text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+                    >
+                        {t.modeSwitch.srt}
+                    </button>
+                    <button
+                        onClick={() => setInputMode('PROMPTS')}
+                        className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${inputMode === 'PROMPTS' ? 'bg-purple-600 shadow-md text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+                    >
+                        {t.modeSwitch.prompts}
+                    </button>
                 </div>
-            </div>
+            )
+            }
 
-            {/* SRT Input */}
-            <Node
-                title={t.sourceMaterial}
-                color="blue"
-                icon={<FileText size={20} />}
-                isActive={true}
-            >
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
-                    {t.transcriptLabel}
-                </label>
-                <textarea
-                    className="w-full h-40 bg-slate-900/50 border border-slate-700 rounded-lg p-4 text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all placeholder-slate-600 resize-y font-mono"
-                    placeholder={t.transcriptPlaceholder}
-                    value={srtInput}
-                    onChange={(e) => setSrtInput(e.target.value)}
-                ></textarea>
-                <div className="flex justify-end mt-2 text-xs text-slate-500">
-                    {srtInput.length > 0 ? `${srtInput.split(/\n\s*\n/).length} ${t.wordsDetected}` : t.waitingInput}
-                </div>
-            </Node>
+            {
+                (pipelineMode === 'AVATAR' || inputMode === 'SRT') && (
+                    <Node
+                        title={t.sourceMaterial}
+                        color="blue"
+                        icon={<FileText size={20} />}
+                        isActive={true}
+                    >
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
+                            {t.transcriptLabel}
+                        </label>
+                        <textarea
+                            className="w-full h-40 bg-slate-900/50 border border-slate-700 rounded-lg p-4 text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all placeholder-slate-600 resize-y font-mono"
+                            placeholder={t.transcriptPlaceholder}
+                            value={srtInput}
+                            onChange={(e) => setSrtInput(e.target.value)}
+                        />
+                        <div className="mt-2 text-xs text-slate-500 flex items-center justify-between">
+                            <span>{srtInput.trim() ? parseSRT(srtInput).length : 0} {t.wordsDetected}</span>
+                            {!srtInput.trim() && <span className="animate-pulse">{t.waitingInput}</span>}
+                        </div>
+                    </Node>
+                )
+            }
+
+            {
+                pipelineMode === 'STANDARD' && inputMode === 'PROMPTS' && (
+                    <Node
+                        title={t.directPrompts.title}
+                        color="purple"
+                        icon={<FileText size={20} />}
+                        isActive={true}
+                    >
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
+                            {t.directPrompts.label}
+                        </label>
+                        <textarea
+                            className="w-full h-40 bg-slate-900/50 border border-slate-700/50 rounded-lg p-4 text-xs focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none transition-all placeholder-slate-600 resize-y font-mono"
+                            placeholder={t.directPrompts.placeholder}
+                            value={promptInput}
+                            onChange={(e) => setPromptInput(e.target.value)}
+                        />
+                        <div className="mt-2 text-xs text-slate-500 flex items-center justify-between">
+                            <span>
+                                {promptInput.trim() ? promptInput.split('\n').filter(p => p.trim() !== '').length : 0} {t.directPrompts.count}
+                            </span>
+                            {!promptInput.trim() && <span className="animate-pulse">{t.directPrompts.waiting}</span>}
+                        </div>
+                    </Node>
+                )
+            }
 
             <Node
                 title={t.agentConfig}
@@ -704,51 +811,53 @@ function App() {
                 </button>
             </div>
 
-            {segments.length > 0 && (
-                <div ref={resultsRef}>
-                    <Node
-                        title={t.generatedTimeline}
-                        color="green"
-                        icon={<Database size={20} />}
-                        isActive={true}
-                        className="animate-in fade-in slide-in-from-bottom-8 duration-700"
-                    >
-                        <div className="flex justify-between items-center mb-6 px-2">
-                            <div className="flex items-center gap-2">
-                                <span className="text-sm font-semibold text-emerald-400 bg-emerald-950/50 px-3 py-1 rounded-full border border-emerald-500/30">
-                                    {segments.length} {t.promptsGenerated}
-                                </span>
-                                {status === FlowStatus.PROCESSING && (
-                                    <span className="text-xs text-slate-400 animate-pulse">
-                                        {t.agentWorking}
+            {
+                segments.length > 0 && (
+                    <div ref={resultsRef}>
+                        <Node
+                            title={t.generatedTimeline}
+                            color="green"
+                            icon={<Database size={20} />}
+                            isActive={true}
+                            className="animate-in fade-in slide-in-from-bottom-8 duration-700"
+                        >
+                            <div className="flex justify-between items-center mb-6 px-2">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-sm font-semibold text-emerald-400 bg-emerald-950/50 px-3 py-1 rounded-full border border-emerald-500/30">
+                                        {segments.length} {t.promptsGenerated}
                                     </span>
-                                )}
+                                    {status === FlowStatus.PROCESSING && (
+                                        <span className="text-xs text-slate-400 animate-pulse">
+                                            {t.agentWorking}
+                                        </span>
+                                    )}
+                                </div>
+                                <button
+                                    onClick={copyAllPrompts}
+                                    className="flex items-center gap-2 text-xs font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-3 py-2 rounded-md transition-colors"
+                                >
+                                    <Copy size={14} /> {t.copyAll}
+                                </button>
                             </div>
-                            <button
-                                onClick={copyAllPrompts}
-                                className="flex items-center gap-2 text-xs font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-3 py-2 rounded-md transition-colors"
-                            >
-                                <Copy size={14} /> {t.copyAll}
-                            </button>
-                        </div>
 
-                        <div className="space-y-4 max-h-[1000px] overflow-y-auto pr-2 custom-scrollbar">
-                            {segments.map((segment) => (
-                                <TimelineCard
-                                    key={segment.id}
-                                    segment={segment}
-                                    onRegeneratePrompt={handleRegeneratePrompt}
-                                    onRegenerateVideo={handleRegenerateVideo}
-                                    onDownloadVideo={handleDownloadVideo}
-                                    labels={t.timeline}
-                                />
-                            ))}
-                        </div>
+                            <div className="space-y-4 max-h-[1000px] overflow-y-auto pr-2 custom-scrollbar">
+                                {segments.map((segment) => (
+                                    <TimelineCard
+                                        key={segment.id}
+                                        segment={segment}
+                                        onRegeneratePrompt={handleRegeneratePrompt}
+                                        onRegenerateVideo={handleRegenerateVideo}
+                                        onDownloadVideo={handleDownloadVideo}
+                                        labels={t.timeline}
+                                    />
+                                ))}
+                            </div>
 
 
-                    </Node>
-                </div>
-            )}
+                        </Node>
+                    </div>
+                )
+            }
         </>
     );
 
