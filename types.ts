@@ -43,6 +43,7 @@ export enum FlowStatus {
 
 export type Language = 'it' | 'en';
 
+export type PipelineMode = 'AVATAR' | 'STANDARD';
 export type InputMode = 'SRT' | 'PROMPTS';
 
 export interface SrtEntry {
