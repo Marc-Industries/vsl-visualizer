@@ -24,6 +24,21 @@ export const TRANSLATIONS = {
     agentWorking: "Generating prompts & images...",
     copyAll: "Copy Prompts",
     copySuccess: "All prompts copied to clipboard!",
+    pipelineMode: {
+      avatar: "Avatar & Product",
+      standard: "Standard Workflow"
+    },
+    modeSwitch: {
+      srt: "From SRT Subtitles",
+      prompts: "Direct Prompts"
+    },
+    directPrompts: {
+      title: "Direct Image Prompts",
+      label: "Paste your image prompts (one per line)",
+      placeholder: "A cinematic shot of a futuristic city...\nA close up of a coffee cup...\nA wide shot of a mountain landscape...",
+      count: "prompts detected",
+      waiting: "Waiting for prompts..."
+    },
     avatar: {
       sectionTitle: "Character & Product Setup",
       avatarLabel: "Avatar / Character Photo",
@@ -117,6 +132,21 @@ Your task is to take the provided script segment and generate a single Nano Bana
     agentWorking: "Generazione prompt e immagini...",
     copyAll: "Copia Prompt",
     copySuccess: "Tutti i prompt copiati negli appunti!",
+    pipelineMode: {
+      avatar: "Avatar & Prodotto",
+      standard: "Standard Workflow"
+    },
+    modeSwitch: {
+      srt: "Da Sottotitoli SRT",
+      prompts: "Prompt Diretti"
+    },
+    directPrompts: {
+      title: "Prompt Diretti Immagini",
+      label: "Incolla i tuoi prompt visivi (uno per riga)",
+      placeholder: "L'inquadratura cinematografica di una città futuristica...\nUn dettaglio di una tazza di caffè...\nUna panoramica di un paesaggio montano...",
+      count: "prompt rilevati",
+      waiting: "In attesa di prompt..."
+    },
     avatar: {
       sectionTitle: "Setup Personaggio & Prodotto",
       avatarLabel: "Foto Avatar / Personaggio",
